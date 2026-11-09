@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>동작 미리보기 · 네이버 쇼핑 수집기</title><link rel="stylesheet" href="demo.css"></head>
+<body>
+  <header class="demo-header"><div><p class="eyebrow">SHOPPING COLLECTOR / INTERACTIVE DEMO</p><h1>검색 페이지는 왼쪽에, 제어는 오른쪽에.</h1><p>스크롤부터 다음 검색어까지, 수집 과정을 직접 살펴보세요.</p></div><span class="demo-badge">시뮬레이션 · 실제 수집 없음</span></header>
+  <div class="demo-toolbar"><div class="play-controls"><button id="play" class="primary" disabled>데모 재생</button><button id="next" disabled>다음 단계 →</button><button id="reset" disabled>처음으로</button></div><label>재생 속도 <select id="speed"><option value="20">20×</option><option value="40" selected>40×</option><option value="80">80×</option></select></label><span id="step-count">준비 중</span></div>
+  <div class="demo-layout">
+    <section class="browser-shell" aria-label="검색 페이지 시뮬레이션">
+      <div class="browser-bar"><div class="dots"><i></i><i></i><i></i></div><span id="address">검색어를 입력하면 query에 반영됩니다.</span><span class="mock-label">예시 화면</span></div>
+      <div class="mock-head"><div class="mock-logo">N <span>쇼핑 검색</span></div><div class="mock-search" id="mock-query">플래티넘 사료</div><span id="mock-page">1페이지</span></div>
+      <div class="stage-banner" role="status"><span class="stage-dot"></span><div><strong id="stage">준비</strong><p id="stage-description">데모 재생을 누르면 흐름이 시작됩니다.</p></div><strong id="demo-wait"></strong></div>
+      <div id="mock-viewport" class="mock-viewport"><div class="mock-results-heading">검색 결과 <span>직접 만든 예시 상품 · 실제 네이버 데이터가 아닙니다.</span></div><div id="mock-products"></div><div class="mock-pagination"><span id="pagination-one">1</span><span id="pagination-two">2</span></div></div>
+      <div class="step-track" id="timeline" aria-label="동작 단계"></div>
+    </section>
+    <section class="panel-shell" aria-label="오른쪽 사이드 패널 미리보기"><div class="panel-bar"><span>▥ &nbsp; Shopping Collector</span><small>사이드 패널 미리보기</small></div><iframe id="panel" src="dashboard.html?demo=1" title="수집기 사이드 패널 데모"></iframe></section>
+  </div>
+  <p class="demo-note">이 페이지는 실제 패널 UI와 예시 데이터로 동작을 설명합니다. 실제 실행에서는 네이버 검색 탭이 움직이고, Chrome 사이드 패널에 상태가 표시됩니다. 대기 시간만 선택한 배속으로 압축합니다.</p>
+  <script src="core.js"></script><script src="demo-model.js"></script><script src="demo.js"></script>
+</body></html>

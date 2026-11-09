@@ -1,10 +1,11 @@
 <!doctype html>
 <html lang="ko">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>네이버 쇼핑 수집기</title><link rel="stylesheet" href="dashboard.css"></head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>네이버 쇼핑 수집기</title><link rel="stylesheet" href="dashboard.css"><link rel="stylesheet" href="panel.css"></head>
 <body>
   <header><div class="brand"><span class="logo">N</span><div><strong>Shopping Collector</strong><small>네이버 쇼핑 수집기</small></div></div><span class="local"><i></i> 로컬 저장</span></header>
   <main>
-    <div class="intro"><div><p class="eyebrow">COLLECTION WORKSPACE</p><h1>검색어를 넣고, 상품을 모으세요.</h1><p>검색어별로 1~2페이지를 천천히 탐색하고 상품 정보를 저장합니다.</p></div><span class="version">CHROME EXTENSION · v0.1</span></div>
+    <div class="intro"><div><p class="eyebrow">COLLECTION WORKSPACE</p><h1>검색 페이지 옆에서,<br class="narrow-only"> 수집 흐름을 한눈에.</h1><p>본문에서 탐색 과정을 보고 이 패널에서 제어하세요.</p></div><span class="version">CHROME SIDE PANEL · v0.2</span></div>
+    <div class="preview-entry"><span>실행 전에 흐름부터 살펴보세요.</span><a href="demo.html" target="_blank" rel="noopener" id="demo-link">동작 미리보기 ↗</a></div>
     <div id="preview" class="notice" hidden>화면 미리보기입니다. 수집하려면 Chrome 확장 프로그램으로 설치하세요.</div>
     <div id="error" class="error" role="alert" hidden></div>
     <div class="workspace">
@@ -13,14 +14,15 @@
   "플래티넘 사료"
 ]</textarea><p class="hint" id="input-hint">검색어 1개 · 중복 검색어는 한 번만 실행합니다.</p>
           <div class="schedule"><div><span>검색 범위</span><strong>1~2페이지</strong></div><div><span>스크롤 · 페이지 이동</span><strong>10~70초 <small>무작위</small></strong></div><div><span>다음 검색어</span><strong>3~10분 <small>무작위</small></strong></div></div>
+          <button id="open-preview" class="open-preview">검색 화면만 열기 <small>수집 안 함</small></button>
           <button class="primary" id="start">수집 시작 <span>↗</span></button>
           <div class="controls"><button id="pause" disabled>일시정지</button><button id="resume" disabled>재개</button><button id="stop" disabled>작업 종료</button></div>
-          <p class="footnote">관리 화면을 닫아도 수집은 계속됩니다. 검색 탭과 Chrome은 열어두세요.</p>
+          <p class="footnote">패널을 닫아도 수집은 계속됩니다. 검색 탭과 Chrome은 열어두세요.</p>
         </section>
         <section class="panel guide"><h2>수집하는 정보</h2><p>상품명, 이미지 URL, 업체명, 판매가격, 쿠폰가격, 정상가, 배송비, 상품 링크와 광고 여부</p><p>가격비교 상품은 화면에 표시된 판매처 목록을 함께 저장합니다.</p><a href="help.html" id="guide-link">설치 및 사용 안내 ↗</a></section>
       </aside>
       <div class="right">
-        <section class="panel status-panel"><div class="section-title"><h2>진행 상황</h2><span id="status" class="pill">준비</span></div><div class="metrics"><div><span>수집한 상품</span><strong id="count">0<small>개</small></strong></div><div><span>현재 검색어</span><strong class="keyword" id="current">—</strong></div><div><span>진행 페이지</span><strong id="page">—</strong></div></div><div class="progress-track"><div id="progress"></div></div><div class="status-line"><span id="message" role="status">검색어 목록을 입력하고 수집을 시작하세요.</span><strong id="countdown"></strong></div></section>
+        <section class="panel status-panel"><div class="section-title"><h2>진행 상황</h2><div class="status-actions"><button id="focus" disabled>수집 탭 보기 ↗</button><span id="status" class="pill">준비</span></div></div><div class="metrics"><div><span>수집한 상품</span><strong id="count">0<small>개</small></strong></div><div><span>현재 검색어</span><strong class="keyword" id="current">—</strong></div><div><span>진행 페이지</span><strong id="page">—</strong></div></div><div class="progress-track"><div id="progress"></div></div><div class="status-line"><span id="message" role="status">검색어 목록을 입력하고 수집을 시작하세요.</span><strong id="countdown"></strong></div><div class="activity"><span id="phase">실행 대기</span><span id="scrolls">스크롤 0회</span></div></section>
         <section class="panel results-panel"><div class="section-title"><div class="result-title"><h2>수집 결과</h2><span id="result-count">0개</span></div><div class="export"><button id="csv" disabled>CSV ↓</button><button id="json" disabled>JSON ↓</button><button id="clear" class="text-button" disabled>결과 비우기</button></div></div><div class="filter-row"><input id="filter" aria-label="결과 검색" placeholder="상품명 · 업체명 · 검색어로 필터"><span id="visible-count">최근 200개 표시</span></div><div class="table-wrap"><table><thead><tr><th>상품</th><th>업체</th><th>판매가격</th><th>출처</th></tr></thead><tbody id="rows"></tbody></table><div id="empty" class="empty"><div class="empty-icon">▤</div><strong>아직 수집한 상품이 없습니다.</strong><p>첫 번째 검색어부터 차례대로 이곳에 쌓입니다.</p></div></div></section>
         <details class="panel logs"><summary>실행 기록 <span id="log-count">0</span></summary><ol id="logs"><li>실행 기록이 없습니다.</li></ol></details>
       </div>

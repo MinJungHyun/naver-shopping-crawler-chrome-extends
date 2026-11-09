@@ -5,12 +5,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 const core = require('../extension/core');
 function harness() {
-  const data={}, alarms=new Map(), tabs=new Map(), events={}; let tabId=0, uuid=0;
+  const data={}, alarms=new Map(), tabs=new Map(), events={}, panelCalls=[], windowCalls=[]; let tabId=0, uuid=0;
   const event=name=>({addListener(fn){events[name]=fn;}});
   const chrome={
     storage:{local:{async get(keys){return structuredClone(data);},async set(value){Object.assign(data,structuredClone(value));}}},
     runtime:{id:'test-extension',getURL:file=>`chrome-extension://test-extension/${file}`,onMessage:event('message'),onInstalled:event('installed'),onStartup:event('startup')},
     action:{onClicked:event('action')},
+    sidePanel:{async setPanelBehavior(value){panelCalls.push(value);}},
+    windows:{async update(id,value){windowCalls.push({id,...value});}},
     tabs:{async get(id){if(!tabs.has(id))throw Error('missing');return tabs.get(id);},async create(value){const tab={...value,id:++tabId};tabs.set(tab.id,tab);return tab;},async update(id,value){Object.assign(tabs.get(id),value);return tabs.get(id);},onRemoved:event('removed')},
     alarms:{async create(name,value){alarms.set(name,value);},async clear(name){return alarms.delete(name);},async get(name){return alarms.get(name);},onAlarm:event('alarm')}
   };
@@ -21,7 +23,7 @@ function harness() {
   const settle=()=>send({type:'GET'});
   const source=()=>({id:chrome.runtime.id,tab:{id:data.job.tabId,url:tabs.get(data.job.tabId).url},url:tabs.get(data.job.tabId).url,documentId:`doc-${data.job.keywordIndex}-${data.job.page}`});
   const content=async(type,extra={})=>send({type,token:data.job.token,...extra},source());
-  return {data,alarms,tabs,events,send,source,content,settle};
+  return {data,alarms,tabs,events,send,source,content,settle,panelCalls,windowCalls};
 }
 test('collects pages 1 and 2, waits 3–10 minutes, then advances keyword',async()=>{
   const h=harness(); assert((await h.send({type:'START',keywords:['사료','간식']})).ok);
@@ -74,4 +76,29 @@ test('unresponsive pages pause and untrusted callers cannot clear results',async
 test('existing results are never silently overwritten by a new start',async()=>{
   const h=harness();h.data.items=[{productName:'보관 중'}];
   assert.equal((await h.send({type:'START',keywords:['사료']})).ok,false);assert.equal(h.data.items.length,1);
+});
+test('action opens a side panel without creating a dashboard tab or starting a job',async()=>{
+  const h=harness();await h.settle();
+  assert.deepEqual(h.panelCalls.map(v=>({...v})),[{openPanelOnActionClick:true}]);
+  assert.equal(h.events.action,undefined);assert.equal(h.tabs.size,0);assert.equal(h.data.job,undefined);
+});
+test('collector stays in the starting window and focus reveals its existing tab',async()=>{
+  const h=harness();await h.send({type:'START',keywords:['사료'],windowId:7});
+  assert.equal(h.data.job.windowId,7);assert.equal(h.tabs.get(1).windowId,7);
+  const before=structuredClone(h.data.job);
+  assert.equal((await h.send({type:'FOCUS'})).ok,true);
+  assert.equal(h.tabs.size,1);assert.equal(h.tabs.get(1).active,true);
+  assert.deepEqual(h.windowCalls,[{id:7,focused:true}]);assert.deepEqual(h.data.job,before);
+  h.tabs.delete(1);assert.equal((await h.send({type:'FOCUS'})).ok,false);
+  h.events.removed(1);await h.settle();
+  await h.send({type:'RESUME',windowId:8});assert.equal(h.data.job.windowId,8);assert.equal(h.tabs.get(2).windowId,8);
+});
+test('opening a real search preview neither creates a job nor collects any items',async()=>{
+  const h=harness();
+  assert.equal((await h.send({type:'OPEN_PREVIEW',keywords:['플래티넘 사료'],windowId:7})).ok,true);
+  assert.equal(h.data.job,undefined);assert.equal(h.data.items,undefined);assert.equal(h.alarms.size,0);
+  assert.equal(h.tabs.get(1).windowId,7);assert.equal(new URL(h.tabs.get(1).url).searchParams.get('query'),'플래티넘 사료');
+  const sender={id:'test-extension',tab:{id:1,url:h.tabs.get(1).url},url:h.tabs.get(1).url,documentId:'preview'};
+  assert.equal((await h.send({type:'READY'},sender)).active,false);
+  assert.equal(h.data.job,undefined);assert.equal(h.data.items,undefined);
 });

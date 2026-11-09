@@ -1,9 +1,14 @@
 const $ = id => document.getElementById(id);
-const extensionMode = location.protocol === 'chrome-extension:' && Boolean(globalThis.chrome?.runtime?.id);
+const demoMode = new URLSearchParams(location.search).get('demo') === '1';
+const extensionMode = !demoMode && location.protocol === 'chrome-extension:' && Boolean(globalThis.chrome?.runtime?.id);
 let state = { job: null, items: [] }, busy = false;
 const statusNames = { running: '수집 중', paused: '일시정지', completed: '완료', stopped: '종료' };
 function showError(error) { $('error').textContent = error?.message || String(error); $('error').hidden = false; }
 async function request(type, data = {}) {
+  if (demoMode) {
+    if (window.parent !== window) window.parent.postMessage({ type: 'NSC_DEMO_ACTION', action: type, ...data }, location.origin);
+    return { ok: true };
+  }
   const result = await chrome.runtime.sendMessage({ type, ...data });
   if (!result?.ok) throw new Error(result?.error || '확장 프로그램 연결을 확인하세요.');
   return result;
@@ -24,11 +29,16 @@ function render() {
   $('page').textContent = job ? `${job.page} / 2` : '—';
   $('message').textContent = job?.message || '검색어 목록을 입력하고 수집을 시작하세요.';
   $('progress').style.width = job ? `${job.status === 'completed' ? 100 : Math.min(99, (job.keywordIndex + (job.phase === 'keyword-wait' ? 1 : (job.page - 1) / 2)) / job.keywords.length * 100)}%` : '0%';
-  $('start').disabled = !extensionMode || busy || running || paused || items.length > 0;
+  $('start').disabled = !(extensionMode || demoMode && window.parent !== window) || busy || running || paused || items.length > 0;
+  $('open-preview').disabled = !extensionMode || busy || running || paused;
   $('pause').disabled = busy || !running; $('resume').disabled = busy || !paused; $('stop').disabled = busy || !(running || paused);
   $('keywords').disabled = running || paused;
-  $('csv').disabled = $('json').disabled = items.length === 0;
-  $('clear').disabled = !extensionMode || busy || running || paused || (!job && !items.length);
+  $('csv').disabled = $('json').disabled = demoMode || items.length === 0;
+  $('clear').disabled = !(extensionMode || demoMode) || busy || running || paused || (!job && !items.length);
+  $('focus').disabled = demoMode || !extensionMode || busy || !job?.tabId;
+  const phases = { loading: '검색 페이지 여는 중', collecting: '상품 확인 · 스크롤', 'keyword-wait': '다음 검색어 대기', done: '탐색 완료' };
+  $('phase').textContent = job?.status === 'paused' ? '일시정지됨' : phases[job?.phase] || '실행 대기';
+  $('scrolls').textContent = `스크롤 ${job?.scrolls || 0}회`;
   $('result-count').textContent = `${items.length}개`;
   const query = $('filter').value.trim().toLowerCase();
   const matched = items.filter(v => [v.productName, v.sellerName, v.keyword, ...(v.sellers || []).map(s => s.name)].join(' ').toLowerCase().includes(query));
@@ -45,7 +55,7 @@ function render() {
   $('logs').replaceChildren(...(logs.length ? logs : [Object.assign(document.createElement('li'), { textContent: '실행 기록이 없습니다.' })]));
   updateCountdown();
 }
-function safeUrl(value) { try { const u = new URL(value); return /^https?:$/.test(u.protocol) ? u.href : ''; } catch { return ''; } }
+function safeUrl(value) { if (!value) return ''; try { const u = new URL(value, location.href); return /^https?:$/.test(u.protocol) || demoMode && u.origin === location.origin ? u.href : ''; } catch { return ''; } }
 function row(item) {
   const tr = document.createElement('tr');
   const cell = () => { const td = document.createElement('td'); tr.append(td); return td; };
@@ -65,17 +75,21 @@ function row(item) {
 }
 function updateCountdown() {
   const remaining = state.job?.status === 'running' && state.job.nextActionAt ? Math.max(0, Math.ceil((state.job.nextActionAt - Date.now()) / 1000)) : 0;
-  $('countdown').textContent = remaining ? `${Math.floor(remaining / 60)}분 ${String(remaining % 60).padStart(2, '0')}초` : '';
+  const seconds = demoMode ? state.demoRemainingSeconds || 0 : remaining;
+  $('countdown').textContent = seconds ? `${demoMode ? '예시 ' : ''}${Math.floor(seconds / 60)}분 ${String(seconds % 60).padStart(2, '0')}초` : '';
 }
 async function action(type) {
   if (busy) return; busy = true; $('error').hidden = true;
   try {
-    const keywords = type === 'START' ? validateInput() : undefined;
-    render(); await request(type, { keywords }); await refresh();
+    const keywords = ['START', 'OPEN_PREVIEW'].includes(type) ? validateInput() : undefined;
+    const windowId = extensionMode && ['START', 'RESUME', 'OPEN_PREVIEW'].includes(type) ? (await chrome.windows.getCurrent()).id : undefined;
+    render(); await request(type, { keywords, windowId }); await refresh();
   } catch (error) { showError(error); }
   finally { busy = false; render(); }
 }
 for (const type of ['START', 'PAUSE', 'RESUME', 'STOP']) $(type.toLowerCase()).addEventListener('click', () => action(type));
+$('focus').addEventListener('click', () => action('FOCUS'));
+$('open-preview').addEventListener('click', () => action('OPEN_PREVIEW'));
 let clearArmed = false;
 $('clear').addEventListener('click', async () => {
   if (!clearArmed) { clearArmed = true; $('clear').textContent = '정말 비울까요?'; setTimeout(() => { clearArmed = false; $('clear').textContent = '결과 비우기'; }, 5000); return; }
@@ -89,7 +103,22 @@ function download(format) {
   const a = document.createElement('a'); a.href = url; a.download = `naver-shopping-${new Date().toISOString().replace(/[:.]/g, '-')}.${format}`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 $('csv').addEventListener('click', () => download('csv')); $('json').addEventListener('click', () => download('json'));
-if (extensionMode) {
+if (demoMode) {
+  document.body.classList.add('demo-mode');
+  $('preview').hidden = false;
+  $('preview').textContent = '데모 · 예시 상품과 압축된 시간으로 동작을 보여줍니다. 실제 수집·저장은 하지 않습니다.';
+  $('start').replaceChildren(document.createTextNode('데모 재생'));
+  document.querySelector('.local').replaceChildren(document.createTextNode('데모 모드'));
+  $('keywords').value = JSON.stringify(['플래티넘 사료', '강아지 간식'], null, 2);
+  validateInput();
+  window.addEventListener('message', event => {
+    if (event.source !== window.parent || event.origin !== location.origin || event.data?.type !== 'NSC_DEMO_STATE') return;
+    const next = event.data.state;
+    if (!next || !Array.isArray(next.items) || next.job && !Array.isArray(next.job.keywords)) return;
+    state = next; render();
+  });
+  if (window.parent !== window) window.parent.postMessage({ type: 'NSC_DEMO_READY' }, location.origin);
+} else if (extensionMode) {
   $('guide-link').href = 'help.html';
   chrome.storage.local.get(['draft', 'job']).then(value => { if (value.job) $('keywords').value = JSON.stringify(value.job.keywords, null, 2); else if (value.draft) $('keywords').value = value.draft; try { validateInput(); } catch {} });
   chrome.storage.onChanged.addListener((changes, area) => { if (area === 'local' && (changes.job || changes.items)) refresh(); });

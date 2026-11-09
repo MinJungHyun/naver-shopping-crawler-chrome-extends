@@ -19,7 +19,7 @@ async function navigate(job) {
   log(job, job.message); await save({ job });
   try { await chrome.tabs.get(job.tabId); }
   catch {
-    const tab = await chrome.tabs.create({ url: 'about:blank', active: true });
+    const tab = await chrome.tabs.create({ url: 'about:blank', active: true, ...(Number.isInteger(job.windowId) ? { windowId: job.windowId } : {}) });
     job.tabId = tab.id; await save({ job });
   }
   await chrome.alarms.create(WATCH, { periodInMinutes: 1 });
@@ -32,14 +32,28 @@ async function nextKeyword(job) {
 function trustedDashboard(sender) { return sender.id === chrome.runtime.id && sender.url === chrome.runtime.getURL('dashboard.html'); }
 async function handle(message, sender) {
   const { job, items } = await read();
-  if (['GET', 'START', 'PAUSE', 'RESUME', 'STOP', 'CLEAR'].includes(message.type)) {
+  if (['GET', 'START', 'PAUSE', 'RESUME', 'STOP', 'CLEAR', 'FOCUS', 'OPEN_PREVIEW'].includes(message.type)) {
     if (!trustedDashboard(sender)) throw new Error('수집기 관리 화면에서 실행하세요.');
     if (message.type === 'GET') return { job, items };
+    if (message.type === 'OPEN_PREVIEW') {
+      if (job && ['running', 'paused'].includes(job.status)) throw new Error('현재 작업을 종료한 후 검색 화면만 열 수 있습니다.');
+      const keyword = parseKeywords(message.keywords)[0];
+      await chrome.tabs.create({ url: searchUrl(keyword, 1), active: true, ...(Number.isInteger(message.windowId) ? { windowId: message.windowId } : {}) });
+      return {};
+    }
+    if (message.type === 'FOCUS') {
+      if (!job?.tabId) throw new Error('열려 있는 수집 탭이 없습니다.');
+      let tab;
+      try { tab = await chrome.tabs.get(job.tabId); } catch { throw new Error('수집 탭이 닫혔습니다. 작업을 재개하면 다시 열립니다.'); }
+      await chrome.tabs.update(tab.id, { active: true });
+      if (Number.isInteger(tab.windowId)) await chrome.windows.update(tab.windowId, { focused: true });
+      return {};
+    }
     if (message.type === 'START') {
       if (job?.status === 'running' || job?.status === 'paused') throw new Error('현재 작업을 종료한 후 새 수집을 시작하세요.');
       if (items.length) throw new Error('기존 결과를 다운로드하고 결과 비우기를 눌러주세요.');
       const newJob = { id: crypto.randomUUID(), keywords: parseKeywords(message.keywords), keywordIndex: 0, page: 1,
-        status: 'running', phase: 'loading', startedAt: Date.now(), count: 0, completedPages: 0, scrolls: 0, logs: [] };
+        status: 'running', phase: 'loading', windowId: message.windowId, startedAt: Date.now(), count: 0, completedPages: 0, scrolls: 0, logs: [] };
       await save({ job: newJob, items: [] }); await navigate(newJob); return {};
     }
     if (message.type === 'CLEAR') {
@@ -51,6 +65,7 @@ async function handle(message, sender) {
     if (message.type === 'STOP' && ['running', 'paused'].includes(job.status)) await halt(job, '작업을 종료했습니다. 수집 결과는 보관됩니다.', 'stopped');
     if (message.type === 'RESUME' && job.status === 'paused') {
       job.status = 'running';
+      if (Number.isInteger(message.windowId)) job.windowId = message.windowId;
       if (job.resumePhase === 'keyword-wait') {
         job.phase = 'keyword-wait'; job.nextActionAt = Date.now() + Math.max(1000, job.remainingWait || 0);
         job.message = '다음 검색어 대기를 재개했습니다.'; await save({ job });
@@ -103,7 +118,8 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   serial(() => handle(message, sender)).then(result => respond({ ok: true, ...result }), error => respond({ ok: false, error: error.message }));
   return true;
 });
-chrome.action.onClicked.addListener(() => chrome.tabs.create({ url: chrome.runtime.getURL('dashboard.html') }));
+// Chrome keeps the controls beside the search tab instead of opening a dashboard tab.
+chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(console.error);
 chrome.tabs.onRemoved.addListener(tabId => serial(async () => {
   const { job } = await read(); if (job?.tabId === tabId && job.status === 'running') await halt(job, '검색 탭이 닫혔습니다. 재개하면 새 탭에서 이어갑니다.');
 }));
