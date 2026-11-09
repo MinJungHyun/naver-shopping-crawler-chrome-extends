@@ -102,3 +102,19 @@ test('opening a real search preview neither creates a job nor collects any items
   assert.equal((await h.send({type:'READY'},sender)).active,false);
   assert.equal(h.data.job,undefined);assert.equal(h.data.items,undefined);
 });
+test('selected page count and keyword delay control the actual job',async()=>{
+  const h=harness(), settings={maxPages:3,scrollPercent:50,actionMin:5,actionMax:300,keywordMin:60,keywordMax:60};
+  assert.equal((await h.send({type:'START',keywords:['사료','간식'],settings})).ok,true);
+  assert.deepEqual(h.data.job.settings,settings);
+  for(const page of [1,2,3]){
+    assert.equal(h.data.job.page,page);await h.content('READY');await h.content('PAGE_DONE',{count:0,hasNext:true});
+  }
+  assert.equal(h.data.job.phase,'keyword-wait');assert.equal(h.data.job.page,3);
+  assert(h.data.job.nextActionAt-Date.now()<=60000 && h.data.job.nextActionAt-Date.now()>=59000);
+});
+test('one-page runs never navigate to page two and invalid settings do not start a job',async()=>{
+  const h=harness();
+  assert.equal((await h.send({type:'START',keywords:['사료'],settings:{actionMin:1}})).ok,false);assert.equal(h.data.job,undefined);
+  await h.send({type:'START',keywords:['사료'],settings:{maxPages:1}});await h.content('READY');await h.content('PAGE_DONE',{count:0,hasNext:true});
+  assert.equal(h.data.job.page,1);assert.equal(h.data.job.status,'completed');
+});

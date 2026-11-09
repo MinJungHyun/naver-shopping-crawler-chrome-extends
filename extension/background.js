@@ -1,5 +1,5 @@
 importScripts('core.js');
-const { parseKeywords, searchUrl, matchesPage, mergeItems, randomSeconds, timing } = NSC;
+const { parseKeywords, searchUrl, matchesPage, mergeItems, randomSeconds, normalizeSettings } = NSC;
 const NEXT = 'next-keyword', WATCH = 'collector-watchdog';
 let queue = Promise.resolve();
 const serial = fn => { const task = queue.then(fn); queue = task.catch(() => {}); return task; };
@@ -52,7 +52,7 @@ async function handle(message, sender) {
     if (message.type === 'START') {
       if (job?.status === 'running' || job?.status === 'paused') throw new Error('현재 작업을 종료한 후 새 수집을 시작하세요.');
       if (items.length) throw new Error('기존 결과를 다운로드하고 결과 비우기를 눌러주세요.');
-      const newJob = { id: crypto.randomUUID(), keywords: parseKeywords(message.keywords), keywordIndex: 0, page: 1,
+      const newJob = { id: crypto.randomUUID(), keywords: parseKeywords(message.keywords), settings: normalizeSettings(message.settings), keywordIndex: 0, page: 1,
         status: 'running', phase: 'loading', windowId: message.windowId, startedAt: Date.now(), count: 0, completedPages: 0, scrolls: 0, logs: [] };
       await save({ job: newJob, items: [] }); await navigate(newJob); return {};
     }
@@ -97,11 +97,12 @@ async function handle(message, sender) {
   }
   if (message.type === 'HEARTBEAT') { await save({ job }); return { active: true }; }
   if (message.type === 'PAGE_DONE') {
+    const settings = normalizeSettings(job.settings);
     job.completedPages++; job.scrolls = 0;
     log(job, `${job.keywords[job.keywordIndex]} · ${job.page}페이지 완료 (${message.count}개)`);
-    if (job.page === 1 && message.hasNext) { job.page = 2; await navigate(job); }
+    if (job.page < settings.maxPages && message.hasNext) { job.page++; await navigate(job); }
     else if (job.keywordIndex + 1 < job.keywords.length) {
-      const seconds = randomSeconds(timing.keywordMin, timing.keywordMax);
+      const seconds = randomSeconds(settings.keywordMin, settings.keywordMax);
       job.phase = 'keyword-wait'; job.nextActionAt = Date.now() + seconds * 1000;
       job.message = `다음 검색어까지 ${seconds}초 대기`; job.documentId = null; job.token = crypto.randomUUID();
       log(job, job.message); await save({ job }); await chrome.alarms.clear(WATCH);

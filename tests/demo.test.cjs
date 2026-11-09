@@ -24,6 +24,12 @@ test('demo paused and stopped states are distinct and wait values stay within re
   assert.equal(stateAt(model,waiting,'running',17).demoRemainingSeconds,17);
   assert(model.steps.filter(v=>v.waitSeconds).every(v=>v.waitSeconds>=10 && v.waitSeconds<=70));
 });
+test('demo reflects selected settings in pages, waiting and scroll steps',()=>{
+  const model=createDemo(['사료','간식'],{maxPages:1,scrollPercent:100,actionMin:5,actionMax:5,keywordMin:1200,keywordMax:1200});
+  assert.equal(model.products.length,12);assert(model.products.every(v=>v.page===1));assert(!model.steps.some(v=>v.stage==='다음 페이지로 이동'));
+  assert(model.steps.some(v=>v.waitSeconds===5));assert(model.steps.some(v=>v.waitSeconds===1200));assert(model.steps.some(v=>v.message.includes('100%')));
+  assert.equal(stateAt(model,2).job.settings.maxPages,1);
+});
 function dashboardHarness(protocol='chrome-extension:',demo=true){
   const html=fs.readFileSync(path.join(__dirname,'../extension/dashboard.html'),'utf8');
   const {window}=parseHTML(html), document=window.document;

@@ -34,14 +34,17 @@ function render(changeStep = false) {
   byId('step-count').textContent = `${index + 1} / ${model.steps.length} 단계`;
   byId('address').textContent = NSC.searchUrl(model.keywords[step.keywordIndex], step.page);
   byId('mock-query').textContent = model.keywords[step.keywordIndex]; byId('mock-page').textContent = `${step.page}페이지`;
-  byId('pagination-one').classList.toggle('selected', step.page === 1); byId('pagination-two').classList.toggle('selected', step.page === 2);
   byId('stage').textContent = step.phase === 'done' ? step.stage : status === 'paused' ? `${step.stage} · 일시정지` : status === 'stopped' ? '데모 종료' : step.stage;
   byId('stage-description').textContent = current.job?.message || step.message;
   byId('demo-wait').textContent = current.demoRemainingSeconds ? `예시 ${current.demoRemainingSeconds}초` : '';
   if (changeStep) {
+    byId('mock-pagination').replaceChildren(...Array.from({ length: model.settings.maxPages }, (_, i) => {
+      const page = document.createElement('span'); page.textContent = String(i + 1); page.classList.toggle('selected', step.page === i + 1); return page;
+    }));
     drawProducts();
-    byId('timeline').replaceChildren(...['검색 페이지 열기', '상품 정보 확인', '스크롤 전 무작위 대기', '스크롤 · 지연 로딩 확인', '2페이지로 이동', '다음 검색어 대기', '탐색 완료'].map(stage => {
+    byId('timeline').replaceChildren(...['검색 페이지 열기', '상품 정보 확인', '스크롤 전 무작위 대기', '스크롤 · 지연 로딩 확인', '다음 페이지로 이동', '다음 검색어 대기', '탐색 완료'].map(stage => {
       const button = document.createElement('button'); button.textContent = stage; button.classList.toggle('active', stage === step.stage);
+      button.disabled = model.steps.findIndex(v => v.stage === stage) < 0;
       button.addEventListener('click', () => {
         const nextIndex = model.steps.findIndex(v => v.stage === stage); if (nextIndex >= 0) { index = nextIndex; elapsed = 0; playing = false; status = 'paused'; render(true); }
       }); return button;
@@ -69,7 +72,8 @@ window.addEventListener('message', event => {
   if (event.data?.type === 'NSC_DEMO_READY') { ready = true; render(true); return; }
   if (event.data?.type !== 'NSC_DEMO_ACTION') return;
   switch (event.data.action) {
-    case 'START': model = NSCDemo.createDemo(NSC.parseKeywords(event.data.keywords)); reset(); play(); break;
+    case 'CONFIG': model = NSCDemo.createDemo(NSC.parseKeywords(event.data.keywords), event.data.settings); reset(); break;
+    case 'START': model = NSCDemo.createDemo(NSC.parseKeywords(event.data.keywords), event.data.settings); reset(); play(); break;
     case 'PAUSE': playing = false; status = 'paused'; render(); break;
     case 'RESUME': playing = true; status = 'running'; lastTick = performance.now(); render(); break;
     case 'STOP': playing = false; status = 'stopped'; render(); break;

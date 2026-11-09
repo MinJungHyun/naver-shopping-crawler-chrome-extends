@@ -1,6 +1,24 @@
 /* Shared by the dashboard, service worker, content script and Node tests. */
 (function (root) {
   const timing = Object.freeze({ actionMin: 10, actionMax: 70, keywordMin: 180, keywordMax: 600 });
+  const defaultSettings = Object.freeze({ maxPages: 2, scrollPercent: 85, ...timing });
+  function normalizeSettings(input = {}) {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('수집 설정을 확인하세요.');
+    const value = { ...defaultSettings, ...input };
+    const integer = (key, min, max) => {
+      if (!Number.isInteger(value[key]) || value[key] < min || value[key] > max) throw new Error(`${key}: ${min}~${max} 범위의 정수를 선택하세요.`);
+    };
+    integer('maxPages', 1, 10);
+    if (![50, 85, 100].includes(value.scrollPercent)) throw new Error('스크롤 이동량을 선택하세요.');
+    integer('actionMin', 5, 300); integer('actionMax', 5, 300);
+    integer('keywordMin', 60, 1200); integer('keywordMax', 60, 1200);
+    if (value.actionMin > value.actionMax || value.keywordMin > value.keywordMax) throw new Error('최소 대기는 최대 대기보다 클 수 없습니다.');
+    return Object.fromEntries(Object.keys(defaultSettings).map(key => [key, value[key]]));
+  }
+  function timeLabel(seconds) {
+    const minutes = Math.floor(seconds / 60), rest = seconds % 60;
+    return minutes ? `${minutes}분${rest ? ` ${rest}초` : ''}` : `${rest}초`;
+  }
   function parseKeywords(input) {
     const values = typeof input === 'string' ? JSON.parse(input) : input;
     if (!Array.isArray(values) || !values.length || values.some(v => typeof v !== 'string' || !v.trim())) {
@@ -39,6 +57,6 @@
     };
     return '\uFEFF' + [columns, ...items.map(v => columns.map(k => v[k]))].map(row => row.map(cell).join(',')).join('\r\n');
   }
-  root.NSC = { timing, parseKeywords, randomSeconds, searchUrl, matchesPage, itemKey, mergeItems, columns, toCsv };
+  root.NSC = { timing, defaultSettings, normalizeSettings, timeLabel, parseKeywords, randomSeconds, searchUrl, matchesPage, itemKey, mergeItems, columns, toCsv };
   if (typeof module !== 'undefined') module.exports = root.NSC;
 })(globalThis);

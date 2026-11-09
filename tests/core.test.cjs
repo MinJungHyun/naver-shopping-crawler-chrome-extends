@@ -30,3 +30,8 @@ test('CSV includes BOM, escapes quotes/newlines and neutralizes formula cells', 
   const csv=core.toCsv([{keyword:'=HYPERLINK("bad")',productName:'a,"b"\nc',price:119200,sellers:[{name:'판매처'}]}]);
   assert(csv.startsWith('\uFEFF')); assert(csv.includes("\"'=HYPERLINK(\"\"bad\"\")\"")); assert(csv.includes('"a,""b""\nc"')); assert(csv.includes('"119200"'));
 });
+test('settings validate new limits and keep defaults for old jobs', () => {
+  assert.deepEqual(core.normalizeSettings(), core.defaultSettings);
+  assert.deepEqual(core.normalizeSettings({maxPages:10,scrollPercent:50,actionMin:5,actionMax:300,keywordMin:60,keywordMax:1200}),{maxPages:10,scrollPercent:50,actionMin:5,actionMax:300,keywordMin:60,keywordMax:1200});
+  for(const settings of [null,[],{maxPages:0},{maxPages:11},{scrollPercent:25},{actionMin:4},{actionMax:301},{keywordMin:59},{keywordMax:1201},{actionMin:70,actionMax:10},{keywordMin:600,keywordMax:60},{maxPages:'3'}]) assert.throws(()=>core.normalizeSettings(settings));
+});
