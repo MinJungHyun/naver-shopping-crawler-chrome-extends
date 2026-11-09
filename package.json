@@ -1,0 +1,14 @@
+{
+  "name": "naver-shopping-collector",
+  "version": "0.1.0",
+  "private": true,
+  "engines": { "node": ">=22.16.0" },
+  "description": "Naver Shopping Chrome extension",
+  "scripts": {
+    "test": "node --test tests/*.test.cjs",
+    "preview": "python3 -m http.server 8765 --bind 127.0.0.1 --directory extension"
+  },
+  "devDependencies": {
+    "linkedom": "0.18.15"
+  }
+}
