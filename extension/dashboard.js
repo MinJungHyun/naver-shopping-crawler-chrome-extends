@@ -1,8 +1,22 @@
 const $ = id => document.getElementById(id);
 const demoMode = new URLSearchParams(location.search).get('demo') === '1';
+const embedMode = new URLSearchParams(location.search).get('embed') === '1';
 const extensionMode = !demoMode && location.protocol === 'chrome-extension:' && Boolean(globalThis.chrome?.runtime?.id);
 let state = { job: null, items: [] }, busy = false;
 const statusNames = { running: '수집 중', paused: '일시정지', completed: '완료', stopped: '종료' };
+function showVersion() {
+  const el = $('version');
+  if (demoMode) { el.textContent = 'DEMO'; el.title = '동작 데모'; return; }
+  if (extensionMode) {
+    const version = chrome.runtime.getManifest().version;
+    el.textContent = `v${version}`; el.title = `확장 프로그램 v${version}`; return;
+  }
+  if (location.protocol === 'chrome-extension:') { el.textContent = 'v? · 재연결'; el.title = '확장 프로그램 연결이 끊겼습니다. 레이어를 닫고 확장 아이콘으로 다시 여세요.'; return; }
+  el.textContent = 'PREVIEW'; el.title = 'HTTP 미리보기 · 실제 수집 비활성';
+  fetch('manifest.json').then(response => response.json()).then(manifest => {
+    el.textContent = `v${manifest.version} · PREVIEW`; el.title = `HTTP 미리보기 · manifest v${manifest.version} · 실제 수집 비활성`;
+  }).catch(() => {});
+}
 function showError(error) { $('error').textContent = error?.message || String(error); $('error').hidden = false; }
 async function request(type, data = {}) {
   if (demoMode) {
@@ -28,11 +42,17 @@ function fillOptions(id, values, label) {
 fillOptions('max-pages', Array.from({ length: 10 }, (_, i) => i + 1), n => n === 1 ? '1페이지' : `1~${n}페이지`);
 for (const id of ['action-min', 'action-max']) fillOptions(id, Array.from({ length: 60 }, (_, i) => (i + 1) * 5), n => n % 60 ? `${n}초` : `${n / 60}분`);
 for (const id of ['keyword-min', 'keyword-max']) fillOptions(id, Array.from({ length: 20 }, (_, i) => (i + 1) * 60), n => `${n / 60}분`);
-function readSettings() { return NSC.normalizeSettings(Object.fromEntries(settingControls.map(control => [control.dataset.setting, Number(control.value)]))); }
+function readSettings() {
+  return NSC.normalizeSettings(Object.fromEntries(settingControls.map(control => {
+    const key = control.dataset.setting;
+    return [key, control.dataset.kind === 'text' ? control.value.trim() : Number(control.value)];
+  })));
+}
 function writeSettings(settings) {
   const value = NSC.normalizeSettings(settings);
   for (const control of settingControls) {
-    const selected = String(value[control.dataset.setting]);
+    const selected = String(value[control.dataset.setting] ?? '');
+    if (control.dataset.kind === 'text') { control.value = selected; continue; }
     if (![...control.options].some(option => option.value === selected)) {
       const option = document.createElement('option'); option.value = selected; option.textContent = NSC.timeLabel(Number(selected)); control.append(option);
     }
@@ -45,9 +65,11 @@ for (const control of settingControls) control.addEventListener('change', () => 
     const min = $(`${prefix}-min`), max = $(`${prefix}-max`);
     if (Number(min.value) > Number(max.value)) (control === min ? max : min).value = control.value;
   }
-  if (extensionMode) chrome.storage.local.set({ draftSettings: readSettings() }).catch(showError);
+  let settings;
+  try { settings = readSettings(); $('error').hidden = true; } catch (error) { showError(error); return; }
+  if (extensionMode) chrome.storage.local.set({ draftSettings: settings }).catch(showError);
   if (demoMode) {
-    try { request('CONFIG', { settings: readSettings(), keywords: NSC.parseKeywords($('keywords').value) }); } catch { /* Validate the array when starting. */ }
+    try { request('CONFIG', { settings, keywords: NSC.parseKeywords($('keywords').value) }); } catch { /* Validate the array when starting. */ }
   }
 });
 let displayedJobId = null;
@@ -61,9 +83,18 @@ function render() {
   $('current').textContent = job ? job.keywords[job.keywordIndex] : '—';
   $('page').textContent = job ? `${job.page}/${settings.maxPages}p` : '—';
   $('current').title = job ? job.keywords[job.keywordIndex] : '현재 검색어';
-  $('message').textContent = job?.message || '실행 대기'; $('message').title = $('message').textContent;
+  $('message').textContent = job?.message || (items.length ? '기존 결과를 비운 뒤 새 수집을 시작하세요.' : '실행 대기'); $('message').title = $('message').textContent;
   $('progress').style.width = job ? `${job.status === 'completed' ? 100 : Math.min(99, (job.keywordIndex + (job.phase === 'keyword-wait' ? 1 : (job.page - 1) / settings.maxPages)) / job.keywords.length * 100)}%` : '0%';
-  $('start').disabled = !(extensionMode || demoMode && window.parent !== window) || busy || running || paused || items.length > 0;
+  const startReason = !(extensionMode || demoMode && window.parent !== window) ? '확장 프로그램 레이어에서 시작하세요.'
+    : running ? '수집 중에는 새로 시작할 수 없습니다.'
+    : paused ? '일시정지된 작업을 작업 종료로 끝낸 뒤 시작하세요.'
+    : items.length ? '기존 결과를 비운 뒤 시작하세요.'
+    : '';
+  $('start').disabled = Boolean(startReason) || busy;
+  $('start').title = startReason || '수집 시작';
+  $('block-note').hidden = !startReason;
+  $('block-note').textContent = startReason ? `시작 불가 · ${startReason}` : '';
+  $('reset').hidden = !extensionMode || busy || !(running || paused || items.length > 0);
   $('open-preview').disabled = !extensionMode || busy || running || paused;
   $('pause').disabled = busy || !running; $('resume').disabled = busy || !paused; $('stop').disabled = busy || !(running || paused);
   $('keywords').disabled = running || paused;
@@ -117,7 +148,7 @@ async function action(type) {
   if (busy) return; busy = true; $('error').hidden = true;
   try {
     const keywords = ['START', 'OPEN_PREVIEW'].includes(type) ? validateInput() : undefined;
-    const settings = type === 'START' ? readSettings() : undefined;
+    const settings = ['START', 'OPEN_PREVIEW'].includes(type) ? readSettings() : undefined;
     const windowId = extensionMode && ['START', 'RESUME', 'OPEN_PREVIEW'].includes(type) ? (await chrome.windows.getCurrent()).id : undefined;
     render(); await request(type, { keywords, settings, windowId }); await refresh();
   } catch (error) { showError(error); }
@@ -126,6 +157,16 @@ async function action(type) {
 for (const type of ['START', 'PAUSE', 'RESUME', 'STOP']) $(type.toLowerCase()).addEventListener('click', () => action(type));
 $('focus').addEventListener('click', () => action('FOCUS'));
 $('open-preview').addEventListener('click', () => action('OPEN_PREVIEW'));
+let resetArmed = false;
+$('reset').addEventListener('click', async () => {
+  if (!resetArmed) {
+    resetArmed = true; $('reset-label').textContent = '정말 초기화할까요?';
+    setTimeout(() => { resetArmed = false; $('reset-label').textContent = '작업 초기화'; }, 5000);
+    return;
+  }
+  resetArmed = false; $('reset-label').textContent = '작업 초기화';
+  await action('RESET');
+});
 let clearArmed = false;
 $('clear').addEventListener('click', async () => {
   if (!clearArmed) { clearArmed = true; $('clear').textContent = '비울까요?'; setTimeout(() => { clearArmed = false; $('clear').textContent = '비우기'; }, 5000); return; }
@@ -161,6 +202,15 @@ if (demoMode) {
     writeSettings(value.job?.settings || value.draftSettings); try { validateInput(); } catch {}
   }).catch(showError);
   chrome.storage.onChanged.addListener((changes, area) => { if (area === 'local' && (changes.job || changes.items)) refresh(); });
+} else if (location.protocol === 'chrome-extension:') {
+  $('preview').hidden = false;
+  $('preview').textContent = '확장 프로그램 연결이 끊겼습니다. 레이어를 닫고 확장 아이콘으로 다시 여세요.';
 } else $('preview').hidden = false;
+if (embedMode && window.parent !== window) {
+  $('close-overlay').hidden = false;
+  $('close-overlay').addEventListener('click', () => window.parent.postMessage({ type: 'NSC_OVERLAY_CLOSE' }, '*'));
+  window.parent.postMessage({ type: 'NSC_OVERLAY_READY' }, '*');
+}
 setInterval(updateCountdown, 1000);
+showVersion();
 refresh();

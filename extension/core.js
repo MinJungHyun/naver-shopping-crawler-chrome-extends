@@ -1,7 +1,9 @@
 /* Shared by the dashboard, service worker, content script and Node tests. */
 (function (root) {
   const timing = Object.freeze({ actionMin: 10, actionMax: 70, keywordMin: 180, keywordMax: 600 });
-  const defaultSettings = Object.freeze({ maxPages: 2, scrollPercent: 85, ...timing });
+  // One page of 80 by default, so a run can cover the same 80 products without turning pages.
+  const defaultSettings = Object.freeze({ maxPages: 1, pagingSize: 80, catId: '', scrollPercent: 85, ...timing });
+  const pagingSizes = Object.freeze([40, 80]);
   function normalizeSettings(input = {}) {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('수집 설정을 확인하세요.');
     const value = { ...defaultSettings, ...input };
@@ -9,6 +11,9 @@
       if (!Number.isInteger(value[key]) || value[key] < min || value[key] > max) throw new Error(`${key}: ${min}~${max} 범위의 정수를 선택하세요.`);
     };
     integer('maxPages', 1, 10);
+    if (!pagingSizes.includes(value.pagingSize)) throw new Error('페이지당 상품 수를 선택하세요.');
+    value.catId = value.catId == null ? '' : String(value.catId).trim();
+    if (value.catId && !/^\d{1,12}$/.test(value.catId)) throw new Error('카테고리 ID는 12자리 이하 숫자로 입력하세요.');
     if (![50, 85, 100].includes(value.scrollPercent)) throw new Error('스크롤 이동량을 선택하세요.');
     integer('actionMin', 5, 300); integer('actionMax', 5, 300);
     integer('keywordMin', 60, 1200); integer('keywordMax', 60, 1200);
@@ -27,9 +32,14 @@
     return [...new Set(values.map(v => v.trim()))];
   }
   function randomSeconds(min, max, random = Math.random) { return min + Math.floor(random() * (max - min + 1)); }
-  function searchUrl(keyword, page) {
+  function searchUrl(keyword, page, settings = defaultSettings) {
+    const value = settings && typeof settings === 'object' ? settings : defaultSettings;
+    const pagingSize = pagingSizes.includes(value.pagingSize) ? value.pagingSize : defaultSettings.pagingSize;
+    const catId = String(value.catId ?? '').trim();
+    const params = { where: 'all', frm: 'NVSCTAB', query: keyword, pagingIndex: String(page), pagingSize: String(pagingSize), productSet: 'total', sort: 'rel', viewType: 'list' };
+    if (catId) params.catId = catId;
     const url = new URL('https://search.shopping.naver.com/search/all');
-    url.search = new URLSearchParams({ where: 'all', frm: 'NVSCTAB', query: keyword, pagingIndex: String(page), pagingSize: '40', sort: 'rel', viewType: 'list' });
+    url.search = new URLSearchParams(params);
     return url.href;
   }
   function matchesPage(url, job) {
@@ -57,6 +67,6 @@
     };
     return '\uFEFF' + [columns, ...items.map(v => columns.map(k => v[k]))].map(row => row.map(cell).join(',')).join('\r\n');
   }
-  root.NSC = { timing, defaultSettings, normalizeSettings, timeLabel, parseKeywords, randomSeconds, searchUrl, matchesPage, itemKey, mergeItems, columns, toCsv };
+  root.NSC = { timing, defaultSettings, pagingSizes, normalizeSettings, timeLabel, parseKeywords, randomSeconds, searchUrl, matchesPage, itemKey, mergeItems, columns, toCsv };
   if (typeof module !== 'undefined') module.exports = root.NSC;
 })(globalThis);

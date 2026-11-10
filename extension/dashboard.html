@@ -2,7 +2,7 @@
 <html lang="ko">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>네이버 쇼핑 수집기</title><link rel="stylesheet" href="dashboard.css"><link rel="stylesheet" href="panel.css"></head>
 <body>
-  <header><div class="brand"><span class="logo">N</span><strong>Shopping Collector</strong></div><nav><span class="local">로컬 저장</span><a href="demo.html" target="_blank" rel="noopener" id="demo-link">미리보기 ↗</a><a href="help.html" id="guide-link" aria-label="사용 안내" title="사용 안내">?</a></nav></header>
+  <header><div class="brand"><span class="logo">N</span><strong>Shopping Collector</strong></div><nav><span id="version" class="version" title="확장 프로그램 버전">v…</span><span class="local">로컬 저장</span><a href="demo.html" target="_blank" rel="noopener" id="demo-link">미리보기 ↗</a><a href="help.html" id="guide-link" aria-label="사용 안내" title="사용 안내">?</a><button id="close-overlay" class="icon-button" aria-label="레이어 닫기" title="레이어 닫기" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></nav></header>
   <main>
     <section class="panel status-panel" aria-label="진행 상태">
       <div class="status-strip"><span id="status" class="pill">준비</span><span id="current" title="현재 검색어">—</span><span id="page" title="진행 페이지">—</span><strong id="count" title="수집한 상품">0<small>개</small></strong><button id="focus" class="icon-button" aria-label="수집 탭 보기" title="수집 탭 보기" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M10 4H4v16h16v-6"/></svg></button></div>
@@ -18,6 +18,8 @@
 ]</textarea><p class="hint" id="input-hint" role="status" hidden></p>
       <div class="settings">
         <div class="setting-row"><label for="max-pages">검색 범위</label><select id="max-pages" data-setting="maxPages" aria-label="검색 범위"></select></div>
+        <div class="setting-row"><label for="paging-size">페이지당 상품</label><select id="paging-size" data-setting="pagingSize" aria-label="페이지당 상품 수"><option value="40">40개</option><option value="80" selected>80개</option></select></div>
+        <div class="setting-row"><label for="cat-id">카테고리 ID</label><input id="cat-id" data-setting="catId" data-kind="text" inputmode="numeric" autocomplete="off" spellcheck="false" maxlength="12" placeholder="선택 · 예: 50000155" aria-label="카테고리 ID"></div>
         <div class="setting-row"><label for="scroll-percent">스크롤 이동량</label><select id="scroll-percent" data-setting="scrollPercent" aria-label="스크롤 이동량"><option value="50">화면의 50%</option><option value="85" selected>화면의 85%</option><option value="100">화면의 100%</option></select></div>
         <div class="setting-row"><span id="action-label">스크롤 · 페이지 대기</span><div class="range"><select id="action-min" data-setting="actionMin" aria-label="스크롤·페이지 최소 대기"></select><span>~</span><select id="action-max" data-setting="actionMax" aria-label="스크롤·페이지 최대 대기"></select><small>무작위</small></div></div>
         <div class="setting-row"><span>다음 검색어 대기</span><div class="range"><select id="keyword-min" data-setting="keywordMin" aria-label="다음 검색어 최소 대기"></select><span>~</span><select id="keyword-max" data-setting="keywordMax" aria-label="다음 검색어 최대 대기"></select><small>무작위</small></div></div>
@@ -28,6 +30,8 @@
         <button id="resume" class="icon-button" aria-label="재개" title="재개" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12a7 7 0 1 0 2-5M5 4v5h5"/></svg></button>
         <button id="stop" class="icon-button" aria-label="작업 종료" title="작업 종료" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1"/></svg></button>
       </div>
+      <p class="hint" id="block-note" role="status" hidden></p>
+      <button id="reset" class="open-preview" hidden><span id="reset-label">작업 초기화</span> <small>종료 + 결과 비우기</small></button>
       <button id="open-preview" class="open-preview">검색 화면만 열기 <small>수집 안 함 ↗</small></button>
     </section>
     <section class="panel results-panel"><div class="section-title"><div class="result-title"><h2>결과</h2><span id="result-count">0개</span></div><div class="export"><button id="csv" disabled>CSV ↓</button><button id="json" disabled>JSON ↓</button><button id="clear" class="text-button" disabled>비우기</button></div></div><div class="filter-row"><input id="filter" aria-label="결과 검색" placeholder="상품 · 업체 · 검색어 필터"><span id="visible-count">최근 200개 표시</span></div><div class="table-wrap"><table><thead><tr><th>상품</th><th>업체</th><th>판매가격</th><th>출처</th></tr></thead><tbody id="rows"></tbody></table><div id="empty" class="empty"><strong>수집한 상품이 없습니다.</strong><p>결과가 여기에 표시됩니다.</p></div></div></section>

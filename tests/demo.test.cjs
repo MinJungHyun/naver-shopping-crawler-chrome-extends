@@ -7,7 +7,7 @@ const {parseHTML}=require('linkedom');
 const core=require('../extension/core');
 const {createDemo,stateAt}=require('../extension/demo-model');
 test('demo covers scroll, two pages, keyword waits and completion with synthetic items',()=>{
-  const model=createDemo();assert.equal(stateAt(model,0).job,null);
+  const model=createDemo(undefined,{maxPages:2});assert.equal(stateAt(model,0).job,null);
   for(const keyword of model.keywords){
     assert.deepEqual([...new Set(model.products.filter(v=>v.keyword===keyword).map(v=>v.page))],[1,2]);
     assert(model.steps.some(v=>v.keywordIndex===model.keywords.indexOf(keyword)&&v.scrolls>0));

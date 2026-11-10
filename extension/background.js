@@ -1,6 +1,6 @@
 importScripts('core.js');
 const { parseKeywords, searchUrl, matchesPage, mergeItems, randomSeconds, normalizeSettings } = NSC;
-const NEXT = 'next-keyword', WATCH = 'collector-watchdog';
+const NEXT = 'next-keyword', WATCH = 'collector-watchdog', CHECK = 'collector-url-check';
 let queue = Promise.resolve();
 const serial = fn => { const task = queue.then(fn); queue = task.catch(() => {}); return task; };
 const read = async () => { const value = await chrome.storage.local.get(['job', 'items']); return { job: value.job || null, items: value.items || [] }; };
@@ -11,10 +11,39 @@ async function halt(job, message, status = 'paused') {
   job.remainingWait = Math.max(0, (job.nextActionAt || 0) - Date.now());
   job.status = status; job.message = message; job.nextActionAt = null; job.token = crypto.randomUUID();
   log(job, message);
-  await save({ job }); await chrome.alarms.clear(NEXT); await chrome.alarms.clear(WATCH);
+  await save({ job }); await chrome.alarms.clear(NEXT); await chrome.alarms.clear(WATCH); await chrome.alarms.clear(CHECK);
+}
+async function checkLanding(job) {
+  if (!job || job.status !== 'running' || job.phase === 'keyword-wait' || job.phase === 'done') return;
+  let tab;
+  try { tab = await chrome.tabs.get(job.tabId); }
+  catch { return halt(job, '검색 탭이 닫혔습니다. 재개하면 새 탭에서 이어갑니다.'); }
+  const url = tab.pendingUrl || tab.url;
+  if (url && url !== 'about:blank' && !matchesPage(url, job)) {
+    let where = url; try { const u = new URL(url); where = u.host + u.pathname; } catch { /* keep full URL */ }
+    return halt(job, `검색 페이지가 예상 주소와 다릅니다(${where}). 로그인·접근 제한·리다이렉트를 확인한 후 재개하세요.`);
+  }
+  // A content script that talks to us flips phase away from 'loading' via READY.
+  if (job.phase !== 'loading') return;
+  job.checks = (job.checks || 0) + 1;
+  if (job.checks > 5) return halt(job, '검색 탭은 열렸지만 수집 스크립트가 응답하지 않습니다. 확장 프로그램 사이트 접근 권한과 새로고침 상태를 확인한 후 재개하세요.');
+  if (tab.status === 'loading') { await save({ job }); return void chrome.alarms.create(CHECK, { when: Date.now() + 12000 }); }
+  if (!job.reinjected) {
+    job.reinjected = true;
+    try {
+      await chrome.scripting.executeScript({ target: { tabId: job.tabId }, files: ['core.js', 'extractor.js', 'content.js'] });
+      job.message = '수집 스크립트를 다시 넣고 연결을 확인하는 중';
+    } catch (error) {
+      return halt(job, `검색 탭에 수집 스크립트를 넣지 못했습니다(${error.message}). 확장 프로그램의 사이트 접근 권한을 확인한 후 재개하세요.`);
+    }
+    log(job, job.message);
+  }
+  await save({ job });
+  await chrome.alarms.create(CHECK, { when: Date.now() + 12000 });
 }
 async function navigate(job) {
   job.phase = 'loading'; job.documentId = null; job.token = crypto.randomUUID(); job.nextActionAt = null;
+  job.checks = 0; job.reinjected = false;
   job.lastHeartbeat = Date.now(); job.message = `${job.keywords[job.keywordIndex]} · ${job.page}페이지 여는 중`;
   log(job, job.message); await save({ job });
   try { await chrome.tabs.get(job.tabId); }
@@ -23,22 +52,60 @@ async function navigate(job) {
     job.tabId = tab.id; await save({ job });
   }
   await chrome.alarms.create(WATCH, { periodInMinutes: 1 });
-  await chrome.tabs.update(job.tabId, { url: searchUrl(job.keywords[job.keywordIndex], job.page) });
+  await chrome.tabs.update(job.tabId, { url: searchUrl(job.keywords[job.keywordIndex], job.page, job.settings) });
+  // A redirect (login/block page) never runs the content script, so check the landing URL.
+  await chrome.alarms.create(CHECK, { when: Date.now() + 12000 });
 }
 async function nextKeyword(job) {
   job.keywordIndex += 1; job.page = 1; job.scrolls = 0;
   await navigate(job);
 }
-function trustedDashboard(sender) { return sender.id === chrome.runtime.id && sender.url === chrome.runtime.getURL('dashboard.html'); }
+function trustedDashboard(sender) {
+  if (sender.id !== chrome.runtime.id) return false;
+  const base = chrome.runtime.getURL('dashboard.html');
+  return sender.url === base || Boolean(sender.url && sender.url.startsWith(`${base}?`));
+}
+function openDashboardWindow() {
+  return chrome.windows.create({ url: chrome.runtime.getURL('dashboard.html'), type: 'popup', width: 420, height: 840 }).catch(console.error);
+}
+const OVERLAY = 'nsc-layer';
+async function probeOverlay(tabId) {
+  const [probe] = await chrome.scripting.executeScript({ target: { tabId }, func: id => Boolean(document.getElementById(id)), args: [OVERLAY] });
+  return Boolean(probe?.result);
+}
+async function ensureOverlay(tabId) {
+  try {
+    if (await probeOverlay(tabId)) return;
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['overlay.js'] });
+  } catch (error) { console.warn('레이어를 넣지 못했습니다:', error.message); }
+}
+async function toggleOverlay(tabId) {
+  try {
+    if (await probeOverlay(tabId)) {
+      await chrome.scripting.executeScript({ target: { tabId }, func: id => document.getElementById(id)?.remove(), args: [OVERLAY] });
+      return;
+    }
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['overlay.js'] });
+  } catch (error) {
+    // chrome:// pages and strict CSP pages cannot host the layer.
+    console.warn('레이어를 넣지 못해 창으로 엽니다:', error.message);
+    await openDashboardWindow();
+  }
+}
 async function handle(message, sender) {
+  if (message.type === 'OVERLAY_FAILED') { await openDashboardWindow(); return {}; }
   const { job, items } = await read();
-  if (['GET', 'START', 'PAUSE', 'RESUME', 'STOP', 'CLEAR', 'FOCUS', 'OPEN_PREVIEW'].includes(message.type)) {
+  if (['GET', 'START', 'PAUSE', 'RESUME', 'STOP', 'CLEAR', 'RESET', 'FOCUS', 'OPEN_PREVIEW'].includes(message.type)) {
     if (!trustedDashboard(sender)) throw new Error('수집기 관리 화면에서 실행하세요.');
     if (message.type === 'GET') return { job, items };
+    if (message.type === 'RESET') {
+      await chrome.alarms.clear(NEXT); await chrome.alarms.clear(WATCH); await chrome.alarms.clear(CHECK);
+      await save({ job: null, items: [] }); return {};
+    }
     if (message.type === 'OPEN_PREVIEW') {
       if (job && ['running', 'paused'].includes(job.status)) throw new Error('현재 작업을 종료한 후 검색 화면만 열 수 있습니다.');
       const keyword = parseKeywords(message.keywords)[0];
-      await chrome.tabs.create({ url: searchUrl(keyword, 1), active: true, ...(Number.isInteger(message.windowId) ? { windowId: message.windowId } : {}) });
+      await chrome.tabs.create({ url: searchUrl(keyword, 1, normalizeSettings(message.settings)), active: true, ...(Number.isInteger(message.windowId) ? { windowId: message.windowId } : {}) });
       return {};
     }
     if (message.type === 'FOCUS') {
@@ -74,15 +141,25 @@ async function handle(message, sender) {
     }
     return {};
   }
-  if (!job || job.status !== 'running' || sender.tab?.id !== job.tabId) return { active: false };
+  if (!job || job.status !== 'running' || sender.tab?.id !== job.tabId) return { active: false, reason: !job || job.status !== 'running' ? 'idle' : 'tab' };
   // A previous document can report after navigation; never let it pause the new page.
   if (message.type !== 'READY' && (message.token !== job.token || sender.documentId !== job.documentId)) return { active: false };
   if (!matchesPage(sender.url || sender.tab.url, job)) {
-    if (message.type === 'READY') return { active: false };
+    if (message.type === 'READY') {
+      // Compare against the tab's *current* URL: a stale document must not pause the new page.
+      try {
+        const tab = await chrome.tabs.get(sender.tab.id);
+        if (tab.url && tab.url === sender.url) {
+          let where = tab.url; try { const u = new URL(tab.url); where = u.host + u.pathname; } catch { /* keep full URL */ }
+          await halt(job, `검색 페이지가 예상 주소와 다릅니다(${where}). 로그인·접근 제한·리다이렉트를 확인하세요.`);
+        }
+      } catch { /* tab closed: let the watchdog handle it */ }
+      return { active: false, reason: 'url' };
+    }
     await halt(job, '검색 탭의 주소가 변경되었습니다. 재개하면 예정된 검색 페이지를 다시 엽니다.'); return { active: false };
   }
   if (message.type === 'READY') {
-    if (job.phase !== 'loading') return { active: false };
+    if (job.phase !== 'loading') return { active: false, reason: 'phase' };
     job.documentId = sender.documentId; job.phase = 'collecting'; job.lastHeartbeat = Date.now();
     job.message = '상품을 읽고 있습니다.'; await save({ job });
     return { active: true, job };
@@ -119,18 +196,29 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   serial(() => handle(message, sender)).then(result => respond({ ok: true, ...result }), error => respond({ ok: false, error: error.message }));
   return true;
 });
-// Chrome keeps the controls beside the search tab instead of opening a dashboard tab.
-chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(console.error);
+// The toolbar icon toggles a floating dashboard layer on the current tab.
+chrome.action.onClicked.addListener(tab => serial(async () => { if (Number.isInteger(tab.id)) await toggleOverlay(tab.id); }));
+// Keep the layer visible on the search tab so controls and progress sit beside the page.
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status !== 'complete') return;
+  serial(async () => {
+    const { job } = await read();
+    if (job?.status !== 'running' || job.tabId !== tabId) return;
+    if (!matchesPage(tab.url, job)) return;
+    await ensureOverlay(tabId);
+  });
+});
 chrome.tabs.onRemoved.addListener(tabId => serial(async () => {
   const { job } = await read(); if (job?.tabId === tabId && job.status === 'running') await halt(job, '검색 탭이 닫혔습니다. 재개하면 새 탭에서 이어갑니다.');
 }));
 chrome.alarms.onAlarm.addListener(alarm => serial(async () => {
   const { job } = await read(); if (job?.status !== 'running') return;
+  if (alarm.name === CHECK) return checkLanding(job);
   if (alarm.name === NEXT && job.phase === 'keyword-wait') {
     if (Date.now() < job.nextActionAt) await chrome.alarms.create(NEXT, { when: job.nextActionAt });
     else await nextKeyword(job);
   }
-  if (alarm.name === WATCH && job.phase !== 'keyword-wait' && Date.now() - job.lastHeartbeat > 180000) await halt(job, '검색 탭이 3분 동안 응답하지 않았습니다. 탭을 확인한 후 재개하세요.');
+  if (alarm.name === WATCH && job.phase !== 'keyword-wait' && Date.now() - job.lastHeartbeat > 60000) await halt(job, '검색 탭이 1분 동안 응답하지 않았습니다. 로그인·접근 제한·리다이렉트 여부를 확인한 후 재개하세요.');
 }));
 const recover = () => serial(async () => {
   const { job } = await read(); if (job?.status === 'running') await halt(job, '브라우저 또는 확장 프로그램이 재시작되었습니다. 재개 버튼을 눌러주세요.');

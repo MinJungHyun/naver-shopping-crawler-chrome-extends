@@ -1,14 +1,17 @@
 {
   "manifest_version": 3,
   "name": "네이버 쇼핑 수집기",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "description": "검색어 배열과 탐색·대기 설정으로 네이버 쇼핑 상품 정보를 로컬에 수집합니다.",
   "minimum_chrome_version": "120",
-  "permissions": ["storage", "alarms", "unlimitedStorage", "sidePanel"],
+  "permissions": ["storage", "alarms", "unlimitedStorage", "scripting", "activeTab"],
   "host_permissions": ["https://search.shopping.naver.com/*"],
   "background": { "service_worker": "background.js" },
-  "action": { "default_title": "네이버 쇼핑 수집기 사이드 패널 열기" },
-  "side_panel": { "default_path": "dashboard.html" },
+  "action": { "default_title": "네이버 쇼핑 수집기 레이어 열기/닫기" },
+  "web_accessible_resources": [{
+    "resources": ["dashboard.html"],
+    "matches": ["https://*/*", "http://*/*"]
+  }],
   "content_scripts": [{
     "matches": ["https://search.shopping.naver.com/*"],
     "js": ["core.js", "extractor.js", "content.js"],

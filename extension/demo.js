@@ -32,7 +32,7 @@ function render(changeStep = false) {
   byId('play').disabled = byId('next').disabled = byId('reset').disabled = !ready;
   byId('next').disabled = !ready || index === model.steps.length - 1 || status === 'stopped';
   byId('step-count').textContent = `${index + 1} / ${model.steps.length} 단계`;
-  byId('address').textContent = NSC.searchUrl(model.keywords[step.keywordIndex], step.page);
+  byId('address').textContent = NSC.searchUrl(model.keywords[step.keywordIndex], step.page, model.settings);
   byId('mock-query').textContent = model.keywords[step.keywordIndex]; byId('mock-page').textContent = `${step.page}페이지`;
   byId('stage').textContent = step.phase === 'done' ? step.stage : status === 'paused' ? `${step.stage} · 일시정지` : status === 'stopped' ? '데모 종료' : step.stage;
   byId('stage-description').textContent = current.job?.message || step.message;
