@@ -150,10 +150,11 @@ async function handle(message, sender) {
     }
     if (job && ['running', 'paused'].includes(job.status)) throw new Error('현재 작업을 종료한 뒤 새 작업을 받으세요.');
     if (items.length && !job?.server?.uploaded) throw new Error('기존 결과를 다운로드하고 비운 뒤 시작하세요.');
-    const { tasks } = await serverApi('/tasks?limit=1');
+    const settings = normalizeSettings(message.settings);
+    const { tasks } = await serverApi('/tasks?limit=1&take=1');
     if (!tasks?.length) throw new Error('수집할 서버 키워드가 없습니다.');
     const task = tasks[0];
-    const next = { id: crypto.randomUUID(), keywords: [task.keyword], settings: normalizeSettings(message.settings), keywordIndex: 0, page: 1,
+    const next = { id: crypto.randomUUID(), keywords: [task.keyword], settings, keywordIndex: 0, page: 1,
       status: 'running', phase: 'loading', windowId: message.windowId, startedAt: Date.now(), count: 0, completedPages: 0, scrolls: 0, logs: [], server: { taskId: task.id } };
     await save({ job: next, items: [] }); await navigate(next); return {};
   }

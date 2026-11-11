@@ -272,6 +272,7 @@ test('token collection only GETs a keyword and POSTs original results',async()=>
   await h.content('PROGRESS',{items:[{keyword:'브랜드',page:1,productId:'1',price:null}],message:'원문'});
   await h.content('PAGE_DONE',{count:1,hasNext:false});
   assert.equal(h.data.job.server.uploaded,true);
+  assert.equal(new URL(h.fetchCalls[0].url).searchParams.get('take'),'1');
   assert.deepEqual(h.fetchCalls.map(r=>new URL(r.url).pathname),['/api/naver-collector/v1/tasks','/api/naver-collector/v1/results']);
   const posted=JSON.parse(h.fetchCalls[1].options.body);
   assert.equal(posted.taskId,7);assert.equal(posted.items[0].price,null);assert.equal(posted.items[0].category3,undefined);
@@ -297,4 +298,11 @@ test('untrusted content cannot start/retry server work and restart preserves upl
   h.data.job.status='completed';h.data.job.server.uploadPending=true;
   await h.events.startup();await h.settle();
   assert.equal(h.data.job.status,'paused');assert.equal(h.data.job.server.uploadPending,true);
+});
+
+test('invalid server collection settings never take a keyword',async()=>{
+  const h=harness();tokenServer(h);
+  await h.send({type:'SAVE_SERVER_CONFIG',serverUrl:'https://collector.example',token:'s'.repeat(40)});
+  assert.equal((await h.send({type:'SERVER_START',settings:{maxPages:0}})).ok,false);
+  assert.equal(h.fetchCalls.length,0);
 });
