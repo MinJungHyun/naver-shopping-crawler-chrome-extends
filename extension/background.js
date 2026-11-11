@@ -1,10 +1,35 @@
-importScripts('core.js');
+importScripts('core.js', 'server.js');
 const { parseKeywords, searchUrl, matchesPage, mergeItems, randomSeconds, normalizeSettings } = NSC;
 const NEXT = 'next-keyword', WATCH = 'collector-watchdog', CHECK = 'collector-url-check';
 let queue = Promise.resolve();
 const serial = fn => { const task = queue.then(fn); queue = task.catch(() => {}); return task; };
 const read = async () => { const value = await chrome.storage.local.get(['job', 'items']); return { job: value.job || null, items: value.items || [] }; };
 const save = value => chrome.storage.local.set(value);
+const SERVER_CONFIG = 'serverConnection';
+let serverStorageError = false;
+const serverStorageReady = Promise.resolve().then(() => chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }))
+  .catch(() => { serverStorageError = true; });
+async function serverSettings(message, sender) {
+  if (!trustedDashboard(sender)) throw new Error('수집기 관리 화면에서 실행하세요.');
+  await serverStorageReady;
+  if (serverStorageError) throw new Error('토큰 저장 보호 설정에 실패했습니다. 확장 프로그램을 새로고침하세요.');
+  const stored = (await chrome.storage.local.get([SERVER_CONFIG]))[SERVER_CONFIG];
+  if (message.type === 'GET_SERVER_CONFIG') return { server: NSCServer.publicConfig(stored) };
+  if (message.type === 'CLEAR_SERVER_CONFIG') {
+    await chrome.storage.local.remove(SERVER_CONFIG);
+    return { server: NSCServer.publicConfig(null) };
+  }
+  if (message.type === 'SAVE_SERVER_CONFIG') {
+    const config = NSCServer.connection(message, stored);
+    if (!await chrome.permissions.contains({ origins: [config.serverUrl + '/*'] })) throw new Error('서버 주소의 사이트 접근을 허용하세요.');
+    await chrome.storage.local.set({ [SERVER_CONFIG]: config });
+    return { server: NSCServer.publicConfig(config) };
+  }
+  if (!stored) throw new Error('서버 주소와 토큰을 먼저 저장하세요.');
+  const config = NSCServer.connection(stored);
+  if (!await chrome.permissions.contains({ origins: [config.serverUrl + '/*'] })) throw new Error('서버 주소의 사이트 접근을 허용하세요.');
+  return { ...await NSCServer.check(config), server: NSCServer.publicConfig(config) };
+}
 function log(job, message) { job.logs = [...(job.logs || []), { at: Date.now(), message }].slice(-150); }
 async function halt(job, message, status = 'paused') {
   job.resumePhase = job.phase;
@@ -93,6 +118,7 @@ async function toggleOverlay(tabId) {
   }
 }
 async function handle(message, sender) {
+  if (['GET_SERVER_CONFIG', 'SAVE_SERVER_CONFIG', 'CLEAR_SERVER_CONFIG', 'TEST_SERVER_CONNECTION'].includes(message.type)) return serverSettings(message, sender);
   if (message.type === 'OVERLAY_FAILED') { await openDashboardWindow(); return {}; }
   const { job, items } = await read();
   if (['GET', 'START', 'PAUSE', 'RESUME', 'STOP', 'CLEAR', 'RESET', 'FOCUS', 'OPEN_PREVIEW'].includes(message.type)) {

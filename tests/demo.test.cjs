@@ -38,7 +38,8 @@ function dashboardHarness(protocol='chrome-extension:',demo=true){
   const origin=protocol==='chrome-extension:'?'chrome-extension://test-extension':'http://localhost:8765';
   const location={protocol,origin,href:origin+'/dashboard.html'+(demo?'?demo=1':''),search:demo?'?demo=1':''};
   const chrome={runtime:{id:'test-extension',async sendMessage(message){apiCalls.push(message);return {ok:true,job:null,items:[]};}},storage:{local:{async get(){apiCalls.push('storage.get');return {};},async set(){apiCalls.push('storage.set');}},onChanged:{addListener(){}}}};
-  const ctx=vm.createContext({document,window:{parent,addEventListener:(name,fn)=>listeners[name]=fn},location,chrome,NSC:core,URL,URLSearchParams,Blob,console,setInterval(){},setTimeout(){}});
+  const fetch=async url=>{assert.equal(url,'manifest.json');return {json:async()=>({version:'test-preview'})};};
+  const ctx=vm.createContext({document,window:{parent,addEventListener:(name,fn)=>listeners[name]=fn},location,chrome,NSC:core,URL,URLSearchParams,Blob,console,fetch,setInterval(){},setTimeout(){}});
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../extension/dashboard.js'),'utf8'),ctx);
   return {document,parent,listeners,messages,apiCalls,location};
 }

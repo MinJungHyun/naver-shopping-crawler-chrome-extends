@@ -5,10 +5,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const core = require('../extension/core');
 function harness() {
-  const data={}, alarms=new Map(), tabs=new Map(), events={}, windowCalls=[], popupCalls=[], scriptCalls=[], flags={}; let tabId=0, uuid=0;
+  const data={}, alarms=new Map(), tabs=new Map(), events={}, windowCalls=[], popupCalls=[], scriptCalls=[], fetchCalls=[], storageAccess=[], flags={}; let tabId=0, uuid=0;
   const event=name=>({addListener(fn){events[name]=fn;}});
   const chrome={
-    storage:{local:{async get(keys){return structuredClone(data);},async set(value){Object.assign(data,structuredClone(value));}}},
+    storage:{local:{async get(keys){return structuredClone(data);},async set(value){Object.assign(data,structuredClone(value));},async remove(key){delete data[key];},async setAccessLevel(value){storageAccess.push(value);if(flags.storageDenied)throw Error('blocked');}}},
+    permissions:{async contains(){return flags.permission !== false;}},
     runtime:{id:'test-extension',getURL:file=>`chrome-extension://test-extension/${file}`,onMessage:event('message'),onInstalled:event('installed'),onStartup:event('startup')},
     action:{onClicked:event('action')},
     windows:{async update(id,value){windowCalls.push({id,...value});},async create(value){popupCalls.push({...value});return {id:900,...value};}},
@@ -16,15 +17,76 @@ function harness() {
     scripting:{async executeScript(value){scriptCalls.push(value);if(flags.failScripting)throw Error('Cannot access contents of the page.');return [{result:flags.hasOverlay}];}},
     alarms:{async create(name,value){alarms.set(name,value);},async clear(name){return alarms.delete(name);},async get(name){return alarms.get(name);},onAlarm:event('alarm')}
   };
-  const ctx=vm.createContext({chrome,NSC:core,importScripts(){},crypto:{randomUUID:()=>String(++uuid)},console,Date,URL,Promise});
+  const fetch=async(url,options)=>{fetchCalls.push({url,options});return {ok:!flags.unauthorized,status:flags.unauthorized?401:200,json:async()=>({ok:true,data:{tasks:[]}})};};
+  const ctx=vm.createContext({chrome,NSC:core,importScripts(){},crypto:{randomUUID:()=>String(++uuid)},console,Date,URL,Promise,AbortController,setTimeout,clearTimeout,fetch});
+  vm.runInContext(fs.readFileSync(path.join(__dirname,'../extension/server.js'),'utf8'),ctx);
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../extension/background.js'),'utf8'),ctx);
   const dashboard={id:chrome.runtime.id,url:chrome.runtime.getURL('dashboard.html')};
   const send=(message,sender=dashboard)=>new Promise(resolve=>events.message(message,sender,resolve));
   const settle=()=>send({type:'GET'});
   const source=()=>({id:chrome.runtime.id,tab:{id:data.job.tabId,url:tabs.get(data.job.tabId).url},url:tabs.get(data.job.tabId).url,documentId:`doc-${data.job.keywordIndex}-${data.job.page}`});
   const content=async(type,extra={})=>send({type,token:data.job.token,...extra},source());
-  return {data,alarms,tabs,events,send,source,content,settle,windowCalls,popupCalls,scriptCalls,flags};
+  return {data,alarms,tabs,events,send,source,content,settle,windowCalls,popupCalls,scriptCalls,flags,fetchCalls,storageAccess};
 }
+test('server credentials stay in protected storage and only public metadata reaches the dashboard',async()=>{
+  const h=harness(),token='secret_'.repeat(6),serverUrl='https://collector.example';
+  const saved=await h.send({type:'SAVE_SERVER_CONFIG',serverUrl,token});
+  assert.equal(saved.ok,true);assert.equal(saved.server.hasToken,true);
+  assert.equal(JSON.stringify(saved).includes(token),false);
+  assert.equal(h.data.serverConnection.token,token);
+  assert.equal(h.storageAccess[0].accessLevel,'TRUSTED_CONTEXTS');
+  assert.equal(JSON.stringify(await h.send({type:'GET_SERVER_CONFIG'})).includes(token),false);
+  assert.equal(JSON.stringify(await h.send({type:'GET'})).includes(token),false);
+  assert.equal((await h.send({type:'TEST_SERVER_CONNECTION'})).connected,true);
+  assert.equal(h.fetchCalls.length,1);assert.equal(h.fetchCalls[0].options.method,'GET');
+  assert.equal(h.data.job,undefined);assert.equal(h.tabs.size,0);
+  await h.send({type:'CLEAR_SERVER_CONFIG'});
+  assert.equal(h.data.serverConnection,undefined);
+  assert.equal((await h.send({type:'TEST_SERVER_CONNECTION'})).ok,false);
+});
+test('a saved token cannot silently move to a different origin',async()=>{
+  const h=harness(),token='a'.repeat(40);
+  await h.send({type:'SAVE_SERVER_CONFIG',serverUrl:'https://one.example',token});
+  assert.equal((await h.send({type:'SAVE_SERVER_CONFIG',serverUrl:'https://one.example',token:''})).ok,true);
+  assert.equal((await h.send({type:'SAVE_SERVER_CONFIG',serverUrl:'https://two.example',token:''})).ok,false);
+  assert.equal(h.data.serverConnection.serverUrl,'https://one.example');
+  assert.equal(h.fetchCalls.length,0);
+});
+test('content scripts cannot read, save, clear, or test server credentials',async()=>{
+  const h=harness(),token='a'.repeat(40);
+  await h.send({type:'SAVE_SERVER_CONFIG',serverUrl:'https://collector.example',token});
+  const untrusted={id:'test-extension',url:'https://search.shopping.naver.com/search/all',tab:{id:1}};
+  for(const type of ['GET_SERVER_CONFIG','SAVE_SERVER_CONFIG','CLEAR_SERVER_CONFIG','TEST_SERVER_CONNECTION']){
+    const result=await h.send({type,serverUrl:'https://other.example',token},untrusted);
+    assert.equal(result.ok,false);assert.equal(JSON.stringify(result).includes(token),false);
+  }
+  assert.equal(h.fetchCalls.length,0);assert.equal(h.data.serverConnection.token,token);
+});
+test('host permission denial prevents persistence and requests',async()=>{
+  const h=harness();h.flags.permission=false;
+  assert.equal((await h.send({type:'SAVE_SERVER_CONFIG',serverUrl:'https://collector.example',token:'a'.repeat(40)})).ok,false);
+  assert.equal(h.data.serverConnection,undefined);assert.equal(h.fetchCalls.length,0);
+});
+test('a storage protection failure refuses credential access while local collection still works',async()=>{
+  const h=harness();h.flags.storageDenied=true;
+  const result=await h.send({type:'SAVE_SERVER_CONFIG',serverUrl:'https://collector.example',token:'a'.repeat(40)});
+  assert.equal(result.ok,false);assert.match(result.error,/저장 보호/);
+  assert.equal(h.data.serverConnection,undefined);
+  assert.equal((await h.send({type:'START',keywords:['사료']})).ok,true);
+});
+test('stored credentials remain separate from collection jobs and exported state',async()=>{
+  const h=harness(),token='a'.repeat(40);
+  await h.send({type:'SAVE_SERVER_CONFIG',serverUrl:'https://collector.example',token});
+  await h.send({type:'START',keywords:['사료']});
+  const ready=await h.content('READY');
+  assert.equal(JSON.stringify(ready).includes(token),false);
+  assert.equal(JSON.stringify(h.data.job).includes(token),false);
+  h.flags.unauthorized=true;
+  const result=await h.send({type:'TEST_SERVER_CONNECTION'});
+  assert.equal(result.ok,false);assert.match(result.error,/인증 실패/);
+  assert.equal(h.data.serverConnection.token,token);
+  assert.equal(h.data.job.status,'running');
+});
 test('collects pages 1 and 2, waits 3–10 minutes, then advances keyword',async()=>{
   const h=harness(); assert((await h.send({type:'START',keywords:['사료','간식'],settings:{maxPages:2}})).ok);
   const first=new URL(h.tabs.get(1).url);

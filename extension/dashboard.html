@@ -11,6 +11,19 @@
     </section>
     <div id="preview" class="notice" hidden>미리보기 · 실제 수집 비활성</div>
     <div id="error" class="error" role="alert" hidden></div>
+    <details class="panel server-panel" id="server-panel" open>
+      <summary>서버 연결 <span id="server-badge">미설정</span></summary>
+      <form id="server-form" novalidate>
+        <label for="server-url">서버 주소</label>
+        <input id="server-url" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://example.trycloudflare.com">
+        <label for="server-token">접속 토큰</label>
+        <div class="server-token-row"><input id="server-token" type="password" autocomplete="off" spellcheck="false" placeholder="서버에 등록된 토큰 입력"><button id="server-token-toggle" type="button" aria-label="접속 토큰 표시" aria-pressed="false">표시</button></div>
+        <p class="server-hint">토큰을 한 번 저장하면 다음에도 사용합니다. 연결 확인은 검색어를 조회하며 수집을 시작하지 않습니다.</p>
+        <div class="server-actions"><button id="server-connect" type="submit">저장 후 연결 확인</button><button id="server-clear" type="button">설정 삭제</button></div>
+        <p id="server-status" class="server-status" role="status">서버 주소와 토큰을 입력하세요.</p>
+        <p id="server-extension-id" class="server-extension-id" hidden></p>
+      </form>
+    </details>
     <section class="panel input-panel" aria-label="수집 설정">
       <div class="keyword-heading"><label for="keywords">JSON 배열</label><span class="keyword-meta"><code>string[]</code><strong id="keyword-count">1개</strong></span></div>
       <textarea id="keywords" spellcheck="false" placeholder='["플래티넘 사료", "강아지 간식"]'>[
@@ -36,5 +49,5 @@
     </section>
     <section class="panel results-panel"><div class="section-title"><div class="result-title"><h2>결과</h2><span id="result-count">0개</span></div><div class="export"><button id="csv" disabled>CSV ↓</button><button id="json" disabled>JSON ↓</button><button id="clear" class="text-button" disabled>비우기</button></div></div><div class="filter-row"><input id="filter" aria-label="결과 검색" placeholder="상품 · 업체 · 검색어 필터"><span id="visible-count">최근 200개 표시</span></div><div class="table-wrap"><table><thead><tr><th>상품</th><th>업체</th><th>판매가격</th><th>출처</th></tr></thead><tbody id="rows"></tbody></table><div id="empty" class="empty"><strong>수집한 상품이 없습니다.</strong><p>결과가 여기에 표시됩니다.</p></div></div></section>
     <details class="panel logs"><summary>실행 기록 <span id="log-count">0</span></summary><ol id="logs"><li>실행 기록이 없습니다.</li></ol></details>
-  </main><script src="core.js"></script><script src="dashboard.js"></script>
+  </main><script src="core.js"></script><script src="server.js"></script><script src="dashboard.js"></script><script src="server-settings.js"></script>
 </body></html>
