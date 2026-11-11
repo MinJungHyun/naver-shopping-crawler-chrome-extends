@@ -18,9 +18,10 @@ function harness({extensionMode=true,demoMode=false,initial=null,granted=true,ch
     if(type==='SAVE_SERVER_CONFIG'){stored=server.connection(data,stored||{});return {server:server.publicConfig(stored)};}
     if(type==='TEST_SERVER_CONNECTION'){if(checkError)throw Error(checkError);return {connected:true};}
     if(type==='CLEAR_SERVER_CONFIG'){stored=null;return {server:server.publicConfig(null)};}
+    if(type==='SERVER_START'||type==='RETRY_SERVER_UPLOAD')return {};
   };
-  const chrome={runtime:{id:'a'.repeat(32)},permissions:{request(value){permissions.push(value);return Promise.resolve(granted);}}};
-  vm.runInNewContext(script,{document,extensionMode,demoMode,NSCServer:server,chrome,request});
+  const chrome={windows:{getCurrent:async()=>({id:1})},runtime:{id:'a'.repeat(32)},permissions:{request(value){permissions.push(value);return Promise.resolve(granted);}}};
+  vm.runInNewContext(script,{document,extensionMode,demoMode,NSCServer:server,chrome,request,readSettings:()=>({maxPages:1})});
   const submit=()=>{$('server-form').dispatchEvent(new Event('submit',{cancelable:true}));return tick();};
   return {$,Event,calls,permissions,submit,getStored:()=>stored};
 }
@@ -68,4 +69,11 @@ test('HTTP preview and demo do not read storage, save, or contact the server',as
   await preview.submit();assert.equal(preview.calls.length,0);assert.equal(preview.permissions.length,0);
   const demo=harness({extensionMode:false,demoMode:true});await tick();
   assert.equal(demo.$('server-panel').hidden,true);assert.equal(demo.calls.length,0);
+});
+
+test('saved token login can start server collection without email or OAuth settings',async()=>{
+  const h=harness({initial:{serverUrl:'http://localhost:8080',token:'s'.repeat(40)}});await tick();
+  h.$('server-start').click();await tick();
+  assert.equal(h.calls.find(c=>c.type==='SERVER_START').windowId,1);
+  assert.equal(h.$('server-start').disabled,false);
 });

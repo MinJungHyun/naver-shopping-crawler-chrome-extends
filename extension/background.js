@@ -15,6 +15,10 @@ async function serverSettings(message, sender) {
   if (serverStorageError) throw new Error('토큰 저장 보호 설정에 실패했습니다. 확장 프로그램을 새로고침하세요.');
   const stored = (await chrome.storage.local.get([SERVER_CONFIG]))[SERVER_CONFIG];
   if (message.type === 'GET_SERVER_CONFIG') return { server: NSCServer.publicConfig(stored) };
+  if (['CLEAR_SERVER_CONFIG', 'SAVE_SERVER_CONFIG'].includes(message.type)) {
+    const { job } = await read();
+    if (job?.server && ['running', 'paused'].includes(job.status)) throw new Error('현재 서버 수집을 종료한 뒤 연결을 변경하세요.');
+  }
   if (message.type === 'CLEAR_SERVER_CONFIG') {
     await chrome.storage.local.remove(SERVER_CONFIG);
     return { server: NSCServer.publicConfig(null) };
@@ -29,6 +33,23 @@ async function serverSettings(message, sender) {
   const config = NSCServer.connection(stored);
   if (!await chrome.permissions.contains({ origins: [config.serverUrl + '/*'] })) throw new Error('서버 주소의 사이트 접근을 허용하세요.');
   return { ...await NSCServer.check(config), server: NSCServer.publicConfig(config) };
+}
+async function serverApi(path, body) {
+  await serverStorageReady;
+  if (serverStorageError) throw new Error('토큰 저장 보호 설정을 확인하세요.');
+  const config = (await chrome.storage.local.get([SERVER_CONFIG]))[SERVER_CONFIG];
+  if (!config) throw new Error('서버 주소와 토큰을 먼저 저장하세요.');
+  if (!await chrome.permissions.contains({ origins: [config.serverUrl + '/*'] })) throw new Error('서버 사이트 접근을 허용하세요.');
+  return NSCServer.api(config, path, body);
+}
+async function uploadServerResult(job) {
+  const { items } = await read();
+  job.server.uploadPending = true; await save({ job });
+  try {
+    const result = await serverApi('/results', { taskId: job.server.taskId, items });
+    job.server.uploaded = true; job.server.uploadPending = false; job.status = 'completed'; job.phase = 'done';
+    job.message = `서버 저장 완료 · ${result.resultCount}건` + (typeof result.changedCount === 'number' ? ` · 변경 ${result.changedCount}건` : ''); log(job, job.message); await save({ job });
+  } catch (error) { await halt(job, error.message + ' 로컬 결과는 보관됩니다. 업로드 재시도를 눌러주세요.'); }
 }
 function log(job, message) { job.logs = [...(job.logs || []), { at: Date.now(), message }].slice(-150); }
 async function halt(job, message, status = 'paused') {
@@ -121,6 +142,21 @@ async function handle(message, sender) {
   if (['GET_SERVER_CONFIG', 'SAVE_SERVER_CONFIG', 'CLEAR_SERVER_CONFIG', 'TEST_SERVER_CONNECTION'].includes(message.type)) return serverSettings(message, sender);
   if (message.type === 'OVERLAY_FAILED') { await openDashboardWindow(); return {}; }
   const { job, items } = await read();
+  if (['SERVER_START', 'RETRY_SERVER_UPLOAD'].includes(message.type)) {
+    if (!trustedDashboard(sender)) throw new Error('수집기 관리 화면에서 실행하세요.');
+    if (message.type === 'RETRY_SERVER_UPLOAD') {
+      if (!job?.server?.uploadPending) throw new Error('재전송할 서버 결과가 없습니다.');
+      await uploadServerResult(job); return {};
+    }
+    if (job && ['running', 'paused'].includes(job.status)) throw new Error('현재 작업을 종료한 뒤 새 작업을 받으세요.');
+    if (items.length && !job?.server?.uploaded) throw new Error('기존 결과를 다운로드하고 비운 뒤 시작하세요.');
+    const { tasks } = await serverApi('/tasks?limit=1');
+    if (!tasks?.length) throw new Error('수집할 서버 키워드가 없습니다.');
+    const task = tasks[0];
+    const next = { id: crypto.randomUUID(), keywords: [task.keyword], settings: normalizeSettings(message.settings), keywordIndex: 0, page: 1,
+      status: 'running', phase: 'loading', windowId: message.windowId, startedAt: Date.now(), count: 0, completedPages: 0, scrolls: 0, logs: [], server: { taskId: task.id } };
+    await save({ job: next, items: [] }); await navigate(next); return {};
+  }
   if (['GET', 'START', 'PAUSE', 'RESUME', 'STOP', 'CLEAR', 'RESET', 'FOCUS', 'OPEN_PREVIEW'].includes(message.type)) {
     if (!trustedDashboard(sender)) throw new Error('수집기 관리 화면에서 실행하세요.');
     if (message.type === 'GET') return { job, items };
@@ -157,6 +193,7 @@ async function handle(message, sender) {
     if (message.type === 'PAUSE' && job.status === 'running') await halt(job, '사용자가 일시정지했습니다.');
     if (message.type === 'STOP' && ['running', 'paused'].includes(job.status)) await halt(job, '작업을 종료했습니다. 수집 결과는 보관됩니다.', 'stopped');
     if (message.type === 'RESUME' && job.status === 'paused') {
+      if (job.server?.uploadPending) { await uploadServerResult(job); return {}; }
       job.status = 'running';
       if (Number.isInteger(message.windowId)) job.windowId = message.windowId;
       if (job.resumePhase === 'keyword-wait') {
@@ -212,7 +249,9 @@ async function handle(message, sender) {
       await chrome.alarms.create(NEXT, { when: job.nextActionAt });
     } else {
       job.status = 'completed'; job.phase = 'done'; job.finishedAt = Date.now(); job.nextActionAt = null;
+      if (job.server) job.server.uploadPending = true;
       job.message = `수집 완료 · ${job.count}개`; log(job, job.message); await save({ job }); await chrome.alarms.clear(WATCH);
+      if (job.server) await uploadServerResult(job);
     }
     return { active: false };
   }
@@ -247,13 +286,16 @@ chrome.alarms.onAlarm.addListener(alarm => serial(async () => {
   if (alarm.name === WATCH && job.phase !== 'keyword-wait' && Date.now() - job.lastHeartbeat > 60000) await halt(job, '검색 탭이 1분 동안 응답하지 않았습니다. 로그인·접근 제한·리다이렉트 여부를 확인한 후 재개하세요.');
 }));
 const recover = () => serial(async () => {
-  const { job } = await read(); if (job?.status === 'running') await halt(job, '브라우저 또는 확장 프로그램이 재시작되었습니다. 재개 버튼을 눌러주세요.');
+  const { job } = await read();
+  if (job?.server?.uploadPending && !job.server.uploaded) await halt(job, '전송 결과 확인이 필요합니다. 업로드 재시도를 눌러주세요.');
+  else if (job?.status === 'running') await halt(job, '브라우저 또는 확장 프로그램이 재시작되었습니다. 재개 버튼을 눌러주세요.');
 });
 chrome.runtime.onStartup.addListener(recover);
 chrome.runtime.onInstalled.addListener(recover);
 // Service-worker suspension must not lose a long keyword timer.
 serial(async () => {
   const { job } = await read();
+  if (job?.server?.uploadPending && !job.server.uploaded) await halt(job, '업로드 재시도를 눌러 서버에 결과를 저장하세요.');
   if (job?.status !== 'running') return;
   if (job.phase === 'keyword-wait' && !await chrome.alarms.get(NEXT)) await chrome.alarms.create(NEXT, { when: Math.max(Date.now() + 1000, job.nextActionAt) });
   else if (job.phase !== 'keyword-wait' && !await chrome.alarms.get(WATCH)) await chrome.alarms.create(WATCH, { periodInMinutes: 1 });

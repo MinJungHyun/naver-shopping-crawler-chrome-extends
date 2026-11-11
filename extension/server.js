@@ -51,6 +51,23 @@
       throw new Error('서버에 연결하지 못했습니다. 주소·네트워크·사이트 접근 권한을 확인하세요.');
     } finally { clearTimeout(timeout); }
   }
-  root.NSCServer = { normalizeUrl, connection, publicConfig, check };
+  async function api(config, path, body, fetcher = root.fetch) {
+    const { serverUrl, token } = connection(config);
+    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 30000);
+    try {
+      const response = await fetcher(serverUrl + apiPath + path, {
+        method: body === undefined ? 'GET' : 'POST', credentials: 'omit', redirect: 'error', cache: 'no-store', signal: controller.signal,
+        headers: { Authorization: 'Bearer ' + token, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) })
+      });
+      let value; try { value = await response.json(); } catch (_) { throw new ConnectionError('수집 서버의 JSON 응답을 확인하세요.'); }
+      if (!response.ok || value.ok !== true) throw new ConnectionError(response.status === 401 ? '접속 토큰을 확인하세요.' : '결과 전송에 실패했습니다. 서버 연결과 DB를 확인하세요.');
+      return value.data;
+    } catch (error) {
+      if (error instanceof ConnectionError) throw error;
+      throw new Error('서버에 연결하지 못했습니다. 저장된 결과로 다시 시도하세요.');
+    } finally { clearTimeout(timer); }
+  }
+  root.NSCServer = { normalizeUrl, connection, publicConfig, check, api };
   if (typeof module !== 'undefined') module.exports = root.NSCServer;
 })(globalThis);

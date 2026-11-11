@@ -17,7 +17,7 @@ function harness() {
     scripting:{async executeScript(value){scriptCalls.push(value);if(flags.failScripting)throw Error('Cannot access contents of the page.');return [{result:flags.hasOverlay}];}},
     alarms:{async create(name,value){alarms.set(name,value);},async clear(name){return alarms.delete(name);},async get(name){return alarms.get(name);},onAlarm:event('alarm')}
   };
-  const fetch=async(url,options)=>{fetchCalls.push({url,options});return {ok:!flags.unauthorized,status:flags.unauthorized?401:200,json:async()=>({ok:true,data:{tasks:[]}})};};
+  const fetch=async(url,options)=>{fetchCalls.push({url,options});if(flags.fetch)return flags.fetch(url,options);return {ok:!flags.unauthorized,status:flags.unauthorized?401:200,json:async()=>({ok:true,data:{tasks:[]}})};};
   const ctx=vm.createContext({chrome,NSC:core,importScripts(){},crypto:{randomUUID:()=>String(++uuid)},console,Date,URL,Promise,AbortController,setTimeout,clearTimeout,fetch});
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../extension/server.js'),'utf8'),ctx);
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../extension/background.js'),'utf8'),ctx);
@@ -259,4 +259,42 @@ test('one-page runs never navigate to page two and invalid settings do not start
   assert.equal((await h.send({type:'START',keywords:['사료'],settings:{actionMin:1}})).ok,false);assert.equal(h.data.job,undefined);
   await h.send({type:'START',keywords:['사료'],settings:{maxPages:1}});await h.content('READY');await h.content('PAGE_DONE',{count:0,hasNext:true});
   assert.equal(h.data.job.page,1);assert.equal(h.data.job.status,'completed');
+});
+
+function tokenServer(h) {
+  h.flags.fetch = async url => ({ok:true,status:200,json:async()=>({ok:true,data:url.includes('/tasks?')?{tasks:[{id:7,keyword:'브랜드'}]}:{taskId:7,resultCount:1}})});
+}
+test('token collection only GETs a keyword and POSTs original results',async()=>{
+  const h=harness();tokenServer(h);const secret='s'.repeat(40);
+  await h.send({type:'SAVE_SERVER_CONFIG',serverUrl:'http://localhost:8080',token:secret});
+  assert.equal((await h.send({type:'SERVER_START',settings:{maxPages:1}})).ok,true);
+  const ready=await h.content('READY');assert(!JSON.stringify(ready).includes(secret));
+  await h.content('PROGRESS',{items:[{keyword:'브랜드',page:1,productId:'1',price:null}],message:'원문'});
+  await h.content('PAGE_DONE',{count:1,hasNext:false});
+  assert.equal(h.data.job.server.uploaded,true);
+  assert.deepEqual(h.fetchCalls.map(r=>new URL(r.url).pathname),['/api/naver-collector/v1/tasks','/api/naver-collector/v1/results']);
+  const posted=JSON.parse(h.fetchCalls[1].options.body);
+  assert.equal(posted.taskId,7);assert.equal(posted.items[0].price,null);assert.equal(posted.items[0].category3,undefined);
+});
+test('upload failure keeps data and retry completes without an extra job service',async()=>{
+  const h=harness();tokenServer(h);
+  await h.send({type:'SAVE_SERVER_CONFIG',serverUrl:'https://collector.example',token:'s'.repeat(40)});
+  await h.send({type:'SERVER_START',settings:{maxPages:1}});await h.content('READY');
+  await h.content('PROGRESS',{items:[{keyword:'브랜드',page:1,productId:'1'}],message:'저장'});
+  const original=h.flags.fetch;h.flags.fetch=async(url,options)=>{if(url.endsWith('/results'))throw Error('offline');return original(url,options);};
+  await h.content('PAGE_DONE',{count:1,hasNext:false});
+  assert.equal(h.data.job.status,'paused');assert.equal(h.data.items.length,1);assert.equal(h.data.job.server.uploadPending,true);
+  assert.equal((await h.send({type:'CLEAR_SERVER_CONFIG'})).ok,false);
+  h.flags.fetch=original;await h.send({type:'RETRY_SERVER_UPLOAD'});
+  assert.equal(h.data.job.server.uploaded,true);assert.equal(h.data.items.length,1);
+});
+test('untrusted content cannot start/retry server work and restart preserves upload intent',async()=>{
+  const h=harness();tokenServer(h);
+  const sender={id:'test-extension',url:'https://search.shopping.naver.com/',tab:{id:1}};
+  for(const type of ['SERVER_START','RETRY_SERVER_UPLOAD'])assert.equal((await h.send({type},sender)).ok,false);
+  await h.send({type:'SAVE_SERVER_CONFIG',serverUrl:'https://collector.example',token:'s'.repeat(40)});
+  await h.send({type:'SERVER_START'});
+  h.data.job.status='completed';h.data.job.server.uploadPending=true;
+  await h.events.startup();await h.settle();
+  assert.equal(h.data.job.status,'paused');assert.equal(h.data.job.server.uploadPending,true);
 });

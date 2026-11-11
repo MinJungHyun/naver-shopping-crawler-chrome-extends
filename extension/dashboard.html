@@ -18,8 +18,9 @@
         <input id="server-url" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://example.trycloudflare.com">
         <label for="server-token">접속 토큰</label>
         <div class="server-token-row"><input id="server-token" type="password" autocomplete="off" spellcheck="false" placeholder="서버에 등록된 토큰 입력"><button id="server-token-toggle" type="button" aria-label="접속 토큰 표시" aria-pressed="false">표시</button></div>
-        <p class="server-hint">토큰을 한 번 저장하면 다음에도 사용합니다. 연결 확인은 검색어를 조회하며 수집을 시작하지 않습니다.</p>
-        <div class="server-actions"><button id="server-connect" type="submit">저장 후 연결 확인</button><button id="server-clear" type="button">설정 삭제</button></div>
+        <p class="server-hint">서버 주소와 토큰으로 로그인합니다. 서버 키워드로 수집하면 결과를 자동 전송합니다.</p>
+        <div class="server-actions"><button id="server-connect" type="submit">토큰 로그인</button><button id="server-clear" type="button">설정 삭제</button></div>
+        <div class="server-actions"><button id="server-start" type="button">서버 키워드로 수집</button><button id="server-upload" type="button">업로드 재시도</button></div>
         <p id="server-status" class="server-status" role="status">서버 주소와 토큰을 입력하세요.</p>
         <p id="server-extension-id" class="server-extension-id" hidden></p>
       </form>

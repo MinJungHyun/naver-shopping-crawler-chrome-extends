@@ -5,6 +5,7 @@
   const connect = document.getElementById('server-connect'), clear = document.getElementById('server-clear');
   const toggle = document.getElementById('server-token-toggle'), badge = document.getElementById('server-badge');
   const status = document.getElementById('server-status');
+  const start = document.getElementById('server-start'), retry = document.getElementById('server-upload');
   let saving = false;
   let savedServer = { serverUrl: '', hasToken: false };
   function message(value, error = false) { status.textContent = value; status.dataset.error = String(error); }
@@ -18,8 +19,8 @@
   }
   function lock(value) {
     saving = value;
-    for (const element of [url, token, toggle, connect, clear]) element.disabled = value;
-    connect.textContent = value ? '연결 확인 중…' : '저장 후 연결 확인';
+    for (const element of [url, token, toggle, connect, clear, start, retry]) element.disabled = value;
+    connect.textContent = value ? '연결 확인 중…' : '토큰 로그인';
   }
   toggle.addEventListener('click', () => {
     const visible = token.type === 'password'; token.type = visible ? 'text' : 'password';
@@ -58,9 +59,17 @@
     } catch (error) { message(error?.message || '설정을 삭제하지 못했습니다.', true); }
     finally { lock(false); }
   });
+  for (const [button, type] of [[start, 'SERVER_START'], [retry, 'RETRY_SERVER_UPLOAD']]) button.addEventListener('click', async () => {
+    if (saving || !extensionMode) return;
+    lock(true);
+    try {
+      await request(type, { settings: readSettings(), windowId: (await chrome.windows.getCurrent()).id });
+      message(type === 'SERVER_START' ? '서버 키워드 수집을 시작했습니다.' : '전송을 재시도했습니다. 수집 상태를 확인하세요.');
+    } catch (error) { message(error.message, true); } finally { lock(false); }
+  });
   if (demoMode) { document.getElementById('server-panel').hidden = true; return; }
   if (!extensionMode) {
-    connect.disabled = clear.disabled = true;
+    connect.disabled = clear.disabled = start.disabled = retry.disabled = true;
     message('화면 미리보기입니다. 저장·연결 확인은 Chrome 확장에서 사용할 수 있습니다.');
     return;
   }
