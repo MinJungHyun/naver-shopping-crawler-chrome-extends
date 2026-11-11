@@ -1,6 +1,8 @@
 /* Server settings shared by the dashboard, service worker and offline tests. */
 (function (root) {
   const apiPath = '/api/naver-collector/v1';
+  // apps/admin-api/conf/local.yaml uses server.port 8080 unless PORT overrides it.
+  const defaultServerUrl = 'http://localhost:8080';
   class ConnectionError extends Error {}
   function normalizeUrl(value) {
     if (typeof value !== 'string' || !value.trim()) throw new Error('서버 주소를 입력하세요.');
@@ -19,7 +21,7 @@
     return { serverUrl, token };
   }
   function publicConfig(config) {
-    return { serverUrl: config?.serverUrl || '', hasToken: Boolean(config?.token) };
+    return { serverUrl: config?.serverUrl || defaultServerUrl, hasToken: Boolean(config?.token) };
   }
   async function check(config, fetcher = root.fetch, timeoutMs = 10000) {
     const { serverUrl, token } = connection(config);
@@ -68,6 +70,6 @@
       throw new Error('서버에 연결하지 못했습니다. 저장된 결과로 다시 시도하세요.');
     } finally { clearTimeout(timer); }
   }
-  root.NSCServer = { normalizeUrl, connection, publicConfig, check, api };
+  root.NSCServer = { apiPath, defaultServerUrl, normalizeUrl, connection, publicConfig, check, api };
   if (typeof module !== 'undefined') module.exports = root.NSCServer;
 })(globalThis);

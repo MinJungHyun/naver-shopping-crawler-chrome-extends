@@ -19,7 +19,8 @@ test('search query is encoded, page identity is strict and 80 items per page is 
   assert.equal(params.get('query'), keyword);
   assert.equal(params.get('pagingIndex'),'2');
   assert.equal(params.get('pagingSize'),'80');
-  assert.equal(params.get('catId'),null);
+  assert.equal(params.get('catId'),'50000155');
+  assert.equal(new URL(core.searchUrl(keyword,1,{catId:''})).searchParams.get('catId'),null);
   const catUrl=core.searchUrl(keyword,1,{pagingSize:40,catId:'50000155'});
   assert.equal(new URL(catUrl).searchParams.get('pagingSize'),'40');
   assert.equal(new URL(catUrl).searchParams.get('catId'),'50000155');
@@ -38,8 +39,8 @@ test('CSV includes BOM, escapes quotes/newlines and neutralizes formula cells', 
 });
 test('settings validate new limits and keep defaults for old jobs', () => {
   assert.deepEqual(core.normalizeSettings(), core.defaultSettings);
-  assert.equal(core.normalizeSettings().pagingSize,80);assert.equal(core.normalizeSettings().maxPages,1);assert.equal(core.normalizeSettings().catId,'');
-  assert.deepEqual(core.normalizeSettings({maxPages:10,scrollPercent:50,actionMin:5,actionMax:300,keywordMin:60,keywordMax:1200}),{maxPages:10,pagingSize:80,catId:'',scrollPercent:50,actionMin:5,actionMax:300,keywordMin:60,keywordMax:1200});
+  assert.equal(core.normalizeSettings().pagingSize,80);assert.equal(core.normalizeSettings().maxPages,1);assert.equal(core.normalizeSettings().catId,'50000155');
+  assert.deepEqual(core.normalizeSettings({maxPages:10,scrollPercent:50,actionMin:5,actionMax:300,keywordMin:60,keywordMax:1200}),{maxPages:10,pagingSize:80,catId:'50000155',scrollPercent:50,actionMin:5,actionMax:300,keywordMin:60,keywordMax:1200});
   assert.equal(core.normalizeSettings({catId:' 50000155 '}).catId,'50000155');
   for(const settings of [null,[],{maxPages:0},{maxPages:11},{scrollPercent:25},{actionMin:4},{actionMax:301},{keywordMin:59},{keywordMax:1201},{actionMin:70,actionMax:10},{keywordMin:600,keywordMax:60},{maxPages:'3'},{pagingSize:20},{pagingSize:'80'},{catId:'abc'},{catId:'1234567890123'}]) assert.throws(()=>core.normalizeSettings(settings));
 });

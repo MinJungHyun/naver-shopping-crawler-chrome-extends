@@ -15,10 +15,10 @@
       <summary>서버 연결 <span id="server-badge">미설정</span></summary>
       <form id="server-form" novalidate>
         <label for="server-url">서버 주소</label>
-        <input id="server-url" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://example.trycloudflare.com">
+        <input id="server-url" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="http://localhost:8080">
         <label for="server-token">접속 토큰</label>
         <div class="server-token-row"><input id="server-token" type="password" autocomplete="off" spellcheck="false" placeholder="서버에 등록된 토큰 입력"><button id="server-token-toggle" type="button" aria-label="접속 토큰 표시" aria-pressed="false">표시</button></div>
-        <p class="server-hint">서버 주소와 토큰으로 로그인합니다. 서버 키워드로 수집하면 결과를 자동 전송합니다.</p>
+        <p class="server-hint">기본 주소는 http://localhost:8080 입니다. 서버 주소와 토큰으로 로그인하면 결과를 자동 전송합니다.</p>
         <div class="server-actions"><button id="server-connect" type="submit">토큰 로그인</button><button id="server-clear" type="button">설정 삭제</button></div>
         <div class="server-actions"><button id="server-start" type="button">서버 키워드로 수집</button><button id="server-upload" type="button">업로드 재시도</button></div>
         <p id="server-status" class="server-status" role="status">서버 주소와 토큰을 입력하세요.</p>
@@ -33,7 +33,7 @@
       <div class="settings">
         <div class="setting-row"><label for="max-pages">검색 범위</label><select id="max-pages" data-setting="maxPages" aria-label="검색 범위"></select></div>
         <div class="setting-row"><label for="paging-size">페이지당 상품</label><select id="paging-size" data-setting="pagingSize" aria-label="페이지당 상품 수"><option value="40">40개</option><option value="80" selected>80개</option></select></div>
-        <div class="setting-row"><label for="cat-id">카테고리 ID</label><input id="cat-id" data-setting="catId" data-kind="text" inputmode="numeric" autocomplete="off" spellcheck="false" maxlength="12" placeholder="선택 · 예: 50000155" aria-label="카테고리 ID"></div>
+        <div class="setting-row"><label for="cat-id">카테고리 ID</label><input id="cat-id" data-setting="catId" data-kind="text" inputmode="numeric" autocomplete="off" spellcheck="false" maxlength="12" placeholder="비우면 전체 · 기본 50000155" title="기본 카테고리 50000155 · 비우면 검색어 전체" aria-label="카테고리 ID · 기본 50000155"></div>
         <div class="setting-row"><label for="scroll-percent">스크롤 이동량</label><select id="scroll-percent" data-setting="scrollPercent" aria-label="스크롤 이동량"><option value="50">화면의 50%</option><option value="85" selected>화면의 85%</option><option value="100">화면의 100%</option></select></div>
         <div class="setting-row"><span id="action-label">스크롤 · 페이지 대기</span><div class="range"><select id="action-min" data-setting="actionMin" aria-label="스크롤·페이지 최소 대기"></select><span>~</span><select id="action-max" data-setting="actionMax" aria-label="스크롤·페이지 최대 대기"></select><small>무작위</small></div></div>
         <div class="setting-row"><span>다음 검색어 대기</span><div class="range"><select id="keyword-min" data-setting="keywordMin" aria-label="다음 검색어 최소 대기"></select><span>~</span><select id="keyword-max" data-setting="keywordMax" aria-label="다음 검색어 최대 대기"></select><small>무작위</small></div></div>

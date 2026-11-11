@@ -5,6 +5,9 @@ const config = {serverUrl:'https://collector.example',token:'t'.repeat(40)};
 const response = body => ({ok:true,status:200,json:async()=>body});
 
 test('accepts HTTPS origins and loopback HTTP, normalizes the API base',()=>{
+  assert.equal(server.defaultServerUrl,'http://localhost:8080');
+  assert.equal(server.apiPath,'/api/naver-collector/v1');
+  assert.deepEqual(server.publicConfig(null),{serverUrl:server.defaultServerUrl,hasToken:false});
   assert.equal(server.normalizeUrl(' https://collector.example/api/naver-collector/v1/ '),config.serverUrl);
   assert.equal(server.normalizeUrl('http://127.0.0.1:8787/'),'http://127.0.0.1:8787');
   assert.equal(server.normalizeUrl('http://localhost:8787'),'http://localhost:8787');

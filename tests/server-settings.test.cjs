@@ -25,6 +25,14 @@ function harness({extensionMode=true,demoMode=false,initial=null,granted=true,ch
   const submit=()=>{$('server-form').dispatchEvent(new Event('submit',{cancelable:true}));return tick();};
   return {$,Event,calls,permissions,submit,getStored:()=>stored};
 }
+test('fresh install prefills the local admin-api address without a token',async()=>{
+  const h=harness();await tick();
+  assert.equal(h.$('server-url').value,'http://localhost:8080');
+  assert.equal(h.$('server-token').value,'');
+  assert.match(h.$('server-token').placeholder,/서버에 등록된 토큰/);
+  assert.equal(h.$('server-badge').textContent,'미설정');
+  assert.equal(h.getStored(),null);
+});
 test('saved secrets are never rendered and mask toggle only reveals newly entered text',async()=>{
   const h=harness({initial:{serverUrl:'https://collector.example',token:'a'.repeat(40)}});await tick();
   assert.equal(h.$('server-url').value,'https://collector.example');assert.equal(h.$('server-token').value,'');
@@ -61,7 +69,7 @@ test('authentication failures preserve saved settings for correction and deletio
   h.$('server-url').value='https://collector.example';h.$('server-token').value='a'.repeat(40);
   await h.submit();assert.equal(h.$('server-status').dataset.error,'true');assert.equal(h.$('server-badge').textContent,'저장됨');
   assert.equal(h.$('server-token').value,'');assert(h.getStored());
-  h.$('server-clear').click();await tick();assert.equal(h.getStored(),null);assert.equal(h.$('server-url').value,'');
+  h.$('server-clear').click();await tick();assert.equal(h.getStored(),null);assert.equal(h.$('server-url').value,server.defaultServerUrl);
 });
 test('HTTP preview and demo do not read storage, save, or contact the server',async()=>{
   const preview=harness({extensionMode:false});await tick();

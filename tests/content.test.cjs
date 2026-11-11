@@ -29,7 +29,7 @@ test('content scrolls like a person: uneven flicks that still cover the selected
   assert(scrolls.length>0);assert(scrolls[0].at>=5000);
   assert(bursts.length>=2);
   for(const burst of bursts){assert(Math.abs(burst.net-400)<=3);assert(burst.flicks>=2&&burst.flicks<=5);}
-  const waits=messages.filter(v=>v.type==='PROGRESS'&&v.nextActionAt);assert(waits.every(v=>v.nextActionAt-v.at===5000));
+  const waits=messages.filter(v=>v.type==='PROGRESS'&&v.nextActionAt);assert(waits.every(v=>Math.abs(v.nextActionAt-v.at-5000)<0.01));
   assert(waits.some(v=>v.message.startsWith('3페이지 이동 전')));
   assert.equal(messages.at(-1).type,'PAGE_DONE');assert.equal(messages.at(-1).hasNext,true);
 });

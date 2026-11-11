@@ -92,7 +92,7 @@ test('collects pages 1 and 2, waits 3–10 minutes, then advances keyword',async
   const first=new URL(h.tabs.get(1).url);
   assert.equal(first.searchParams.get('query'),'사료');
   assert.equal(first.searchParams.get('pagingSize'),'80');
-  assert.equal(first.searchParams.get('catId'),null);
+  assert.equal(first.searchParams.get('catId'),'50000155');
   assert((await h.content('READY')).active);
   await h.content('PROGRESS',{items:[{keyword:'사료',page:1,productId:'1',isAd:false}],scrolls:3,message:'저장'});
   const staleToken=h.data.job.token, staleSource=h.source();
@@ -238,9 +238,9 @@ test('category id and page size are applied to start and preview URLs',async()=>
   const preview=new URL([...h.tabs.values()].at(-1).url);
   assert.equal(preview.searchParams.get('catId'),'50000155');assert.equal(preview.searchParams.get('pagingSize'),'80');
 });
-test('a default run covers one page of 80 without turning pages',async()=>{
+test('a default run covers one page of 80 in the default category without turning pages',async()=>{
   const h=harness();await h.send({type:'START',keywords:['사료']});
-  assert.equal(h.data.job.settings.maxPages,1);assert.equal(h.data.job.settings.pagingSize,80);
+  assert.equal(h.data.job.settings.maxPages,1);assert.equal(h.data.job.settings.pagingSize,80);assert.equal(h.data.job.settings.catId,'50000155');
   await h.content('READY');await h.content('PAGE_DONE',{count:80,hasNext:true});
   assert.equal(h.data.job.page,1);assert.equal(h.data.job.status,'completed');
 });
@@ -288,6 +288,80 @@ test('upload failure keeps data and retry completes without an extra job service
   assert.equal((await h.send({type:'CLEAR_SERVER_CONFIG'})).ok,false);
   h.flags.fetch=original;await h.send({type:'RETRY_SERVER_UPLOAD'});
   assert.equal(h.data.job.server.uploaded,true);assert.equal(h.data.items.length,1);
+});
+test('stopping a server task uploads the partial results and keeps the stopped status',async()=>{
+  const h=harness();tokenServer(h);
+  await h.send({type:'SAVE_SERVER_CONFIG',serverUrl:'https://collector.example',token:'s'.repeat(40)});
+  await h.send({type:'SERVER_START',settings:{maxPages:1}});await h.content('READY');
+  await h.content('PROGRESS',{items:[{keyword:'브랜드',page:1,productId:'1'},{keyword:'브랜드',page:1,productId:'2'}],message:'저장'});
+  const stop=await h.send({type:'STOP'});
+  assert.equal(stop.ok,true);
+  assert.equal(h.data.job.status,'stopped');assert.equal(h.data.job.phase,'done');
+  assert.equal(h.data.job.server.uploaded,true);assert.equal(h.data.job.server.uploadPending,false);
+  assert.equal(h.fetchCalls.at(-1).url.endsWith('/results'),true);
+  const posted=JSON.parse(h.fetchCalls.at(-1).options.body);
+  assert.equal(posted.taskId,7);assert.equal(posted.items.length,2);
+});
+test('stopping before any product does not call the results API',async()=>{
+  const h=harness();tokenServer(h);
+  await h.send({type:'SAVE_SERVER_CONFIG',serverUrl:'https://collector.example',token:'s'.repeat(40)});
+  await h.send({type:'SERVER_START',settings:{maxPages:1}});await h.content('READY');
+  const stop=await h.send({type:'STOP'});
+  assert.equal(stop.ok,true);assert.equal(h.data.job.status,'stopped');
+  assert.equal(h.data.job.server.uploadPending,undefined);assert.equal(h.data.job.server.uploaded,undefined);
+  assert.equal(h.fetchCalls.some(r=>r.url.endsWith('/results')),false);
+});
+test('a completed server keyword waits then fetches the next task automatically',async()=>{
+  const h=harness();let taskCalls=0;
+  h.flags.fetch=async url=>{
+    if(url.includes('/tasks?')){taskCalls++;return {ok:true,status:200,json:async()=>({ok:true,data:{tasks:[{id:taskCalls===1?7:8,keyword:taskCalls===1?'브랜드':'간식'}]}})};}
+    return {ok:true,status:200,json:async()=>({ok:true,data:{taskId:7,resultCount:1}})};
+  };
+  await h.send({type:'SAVE_SERVER_CONFIG',serverUrl:'https://collector.example',token:'s'.repeat(40)});
+  await h.send({type:'SERVER_START',settings:{maxPages:1,keywordMin:60,keywordMax:60}});
+  await h.content('READY');
+  await h.content('PROGRESS',{items:[{keyword:'브랜드',page:1,productId:'1'}],message:'저장'});
+  await h.content('PAGE_DONE',{count:1,hasNext:false});
+  assert.equal(h.data.job.status,'running');assert.equal(h.data.job.phase,'keyword-wait');
+  assert.equal(h.alarms.has('next-keyword'),true);
+  assert(h.data.job.nextActionAt-Date.now()>59000 && h.data.job.nextActionAt-Date.now()<=60000);
+  assert.equal(h.data.items.length,1);
+  h.events.alarm({name:'next-keyword'});await h.settle();
+  assert.equal(taskCalls,1);
+  h.data.job.nextActionAt=Date.now()-1;
+  h.events.alarm({name:'next-keyword'});await h.settle();
+  assert.equal(taskCalls,2);
+  assert.equal(new URL(h.fetchCalls.filter(r=>r.url.includes('/tasks?')).at(-1).url).searchParams.get('take'),'1');
+  assert.equal(h.data.job.server.taskId,8);assert.equal(h.data.job.keywords[0],'간식');
+  assert.equal(h.data.job.status,'running');assert.equal(h.data.job.phase,'loading');
+  assert.equal(h.data.items.length,0);
+  assert.equal(new URL(h.tabs.get(h.data.job.tabId).url).searchParams.get('query'),'간식');
+});
+test('server auto-run completes when no keyword remains',async()=>{
+  const h=harness();let taskCalls=0;
+  h.flags.fetch=async url=>{
+    if(url.includes('/tasks?')){taskCalls++;return {ok:true,status:200,json:async()=>({ok:true,data:{tasks:taskCalls===1?[{id:7,keyword:'브랜드'}]:[]}})};}
+    return {ok:true,status:200,json:async()=>({ok:true,data:{taskId:7,resultCount:1}})};
+  };
+  await h.send({type:'SAVE_SERVER_CONFIG',serverUrl:'https://collector.example',token:'s'.repeat(40)});
+  await h.send({type:'SERVER_START',settings:{maxPages:1,keywordMin:60,keywordMax:60}});await h.content('READY');
+  await h.content('PROGRESS',{items:[{keyword:'브랜드',page:1,productId:'1'}],message:'저장'});
+  await h.content('PAGE_DONE',{count:1,hasNext:false});
+  h.data.job.nextActionAt=Date.now()-1;h.events.alarm({name:'next-keyword'});await h.settle();
+  assert.equal(h.data.job.status,'completed');assert.match(h.data.job.message,/대기 중인 서버 키워드가 없습니다/);
+  assert.equal(h.data.items.length,1);assert.equal(taskCalls,2);
+});
+test('stopping during the server keyword wait does not re-upload finished results',async()=>{
+  const h=harness();tokenServer(h);
+  await h.send({type:'SAVE_SERVER_CONFIG',serverUrl:'https://collector.example',token:'s'.repeat(40)});
+  await h.send({type:'SERVER_START',settings:{maxPages:1,keywordMin:60,keywordMax:60}});await h.content('READY');
+  await h.content('PROGRESS',{items:[{keyword:'브랜드',page:1,productId:'1'}],message:'저장'});
+  await h.content('PAGE_DONE',{count:1,hasNext:false});
+  const resultsCalls=()=>h.fetchCalls.filter(r=>r.url.endsWith('/results')).length;
+  assert.equal(resultsCalls(),1);
+  await h.send({type:'STOP'});
+  assert.equal(h.data.job.status,'stopped');assert.equal(h.data.job.server.autoNext,false);
+  assert.equal(resultsCalls(),1);assert.equal(h.data.items.length,1);
 });
 test('untrusted content cannot start/retry server work and restart preserves upload intent',async()=>{
   const h=harness();tokenServer(h);

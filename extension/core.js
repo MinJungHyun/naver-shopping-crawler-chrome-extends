@@ -1,8 +1,8 @@
 /* Shared by the dashboard, service worker, content script and Node tests. */
 (function (root) {
   const timing = Object.freeze({ actionMin: 10, actionMax: 70, keywordMin: 180, keywordMax: 600 });
-  // One page of 80 by default, so a run can cover the same 80 products without turning pages.
-  const defaultSettings = Object.freeze({ maxPages: 1, pagingSize: 80, catId: '', scrollPercent: 85, ...timing });
+  // One page of 80 in the 사료 category by default, so a run covers the same 80 products without turning pages.
+  const defaultSettings = Object.freeze({ maxPages: 1, pagingSize: 80, catId: '50000155', scrollPercent: 85, ...timing });
   const pagingSizes = Object.freeze([40, 80]);
   function normalizeSettings(input = {}) {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('수집 설정을 확인하세요.');
