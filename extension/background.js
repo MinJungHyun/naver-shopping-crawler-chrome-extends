@@ -181,8 +181,9 @@ async function handle(message, sender) {
   if (['SERVER_START', 'RETRY_SERVER_UPLOAD'].includes(message.type)) {
     if (!trustedDashboard(sender)) throw new Error('수집기 관리 화면에서 실행하세요.');
     if (message.type === 'RETRY_SERVER_UPLOAD') {
-      const retryable = job?.server && items.length &&
-        (job.server.uploadPending || ['stopped', 'completed'].includes(job.status) || job.phase === 'keyword-wait');
+      if (!job?.server) throw new Error('서버 키워드로 시작한 작업이 아니라 전송할 서버 작업이 없습니다. 서버 키워드로 수집을 시작하세요.');
+      if (!items.length) throw new Error('전송할 수집 결과가 없습니다.');
+      const retryable = job.server.uploadPending || ['stopped', 'completed'].includes(job.status) || job.phase === 'keyword-wait';
       if (!retryable) throw new Error('재전송할 서버 결과가 없습니다.');
       const result = await uploadServerResult(job, job.status === 'stopped' ? 'stopped' : 'completed');
       return { message: result.message, uploaded: result.uploaded };

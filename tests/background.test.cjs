@@ -402,10 +402,13 @@ test('a failed upload after stop keeps the stopped status so retry can send',asy
   assert.equal(JSON.parse(h.fetchCalls.at(-1).options.body).items.length,2);
   assert.equal(h.data.items.length,2);
 });
-test('upload retry without any kept result reports an error instead of doing nothing',async()=>{
+test('upload retry explains whether the job is not a server task or has no kept result',async()=>{
   const h=harness();
-  const retry=await h.send({type:'RETRY_SERVER_UPLOAD'});
-  assert.equal(retry.ok,false);assert.match(retry.error,/재전송할 서버 결과가 없습니다/);
+  const local=await h.send({type:'RETRY_SERVER_UPLOAD'});
+  assert.equal(local.ok,false);assert.match(local.error,/서버 키워드로 시작한 작업이 아니라/);
+  h.data.job={status:'completed',server:{taskId:7,uploaded:true,uploadPending:false},settings:{}};
+  const empty=await h.send({type:'RETRY_SERVER_UPLOAD'});
+  assert.equal(empty.ok,false);assert.match(empty.error,/전송할 수집 결과가 없습니다/);
   assert.equal(h.fetchCalls.length,0);
 });
 test('untrusted content cannot start/retry server work and restart preserves upload intent',async()=>{
