@@ -349,6 +349,7 @@ test('server auto-run completes when no keyword remains',async()=>{
   await h.content('PAGE_DONE',{count:1,hasNext:false});
   h.data.job.nextActionAt=Date.now()-1;h.events.alarm({name:'next-keyword'});await h.settle();
   assert.equal(h.data.job.status,'completed');assert.match(h.data.job.message,/대기 중인 서버 키워드가 없습니다/);
+  assert.equal(h.data.job.server.autoNext,false);
   assert.equal(h.data.items.length,1);assert.equal(taskCalls,2);
 });
 test('stopping during the server keyword wait does not re-upload finished results',async()=>{
@@ -362,6 +363,50 @@ test('stopping during the server keyword wait does not re-upload finished result
   await h.send({type:'STOP'});
   assert.equal(h.data.job.status,'stopped');assert.equal(h.data.job.server.autoNext,false);
   assert.equal(resultsCalls(),1);assert.equal(h.data.items.length,1);
+});
+test('after a stop, upload retry re-sends the kept results without restarting collection',async()=>{
+  const h=harness();tokenServer(h);
+  await h.send({type:'SAVE_SERVER_CONFIG',serverUrl:'https://collector.example',token:'s'.repeat(40)});
+  await h.send({type:'SERVER_START',settings:{maxPages:1,keywordMin:60,keywordMax:60}});await h.content('READY');
+  await h.content('PROGRESS',{items:[{keyword:'브랜드',page:1,productId:'1'}],message:'저장'});
+  await h.content('PAGE_DONE',{count:1,hasNext:false});
+  const resultsCalls=()=>h.fetchCalls.filter(r=>r.url.endsWith('/results')).length;
+  assert.equal(resultsCalls(),1);
+  await h.send({type:'STOP'});
+  assert.equal(h.data.job.status,'stopped');assert.equal(h.data.job.server.uploaded,true);
+  assert.equal(resultsCalls(),1);assert.equal(h.alarms.has('next-keyword'),false);
+  const before=h.fetchCalls.at(-1);
+  const retry=await h.send({type:'RETRY_SERVER_UPLOAD'});
+  assert.equal(retry.ok,true);assert.equal(retry.uploaded,true);
+  assert.match(retry.message,/서버 저장 완료/);
+  assert.equal(resultsCalls(),2);assert.notEqual(h.fetchCalls.at(-1),before);
+  assert.equal(JSON.parse(h.fetchCalls.at(-1).options.body).items.length,1);
+  assert.equal(h.data.job.status,'stopped');assert.equal(h.data.job.server.autoNext,false);
+  assert.equal(h.alarms.has('next-keyword'),false);assert.equal(h.data.items.length,1);
+});
+test('a failed upload after stop keeps the stopped status so retry can send',async()=>{
+  const h=harness();tokenServer(h);
+  await h.send({type:'SAVE_SERVER_CONFIG',serverUrl:'https://collector.example',token:'s'.repeat(40)});
+  await h.send({type:'SERVER_START',settings:{maxPages:1}});await h.content('READY');
+  await h.content('PROGRESS',{items:[{keyword:'브랜드',page:1,productId:'1'},{keyword:'브랜드',page:1,productId:'2'}],message:'저장'});
+  const original=h.flags.fetch;
+  h.flags.fetch=async(url,options)=>{if(url.endsWith('/results'))throw Error('offline');return original(url,options);};
+  const stop=await h.send({type:'STOP'});
+  assert.equal(stop.ok,true);
+  assert.equal(h.data.job.status,'stopped');assert.equal(h.data.job.server.uploadPending,true);
+  assert.equal(h.data.items.length,2);
+  h.flags.fetch=original;
+  const retry=await h.send({type:'RETRY_SERVER_UPLOAD'});
+  assert.equal(retry.ok,true);assert.equal(retry.uploaded,true);
+  assert.equal(h.data.job.status,'stopped');assert.equal(h.data.job.server.uploadPending,false);
+  assert.equal(JSON.parse(h.fetchCalls.at(-1).options.body).items.length,2);
+  assert.equal(h.data.items.length,2);
+});
+test('upload retry without any kept result reports an error instead of doing nothing',async()=>{
+  const h=harness();
+  const retry=await h.send({type:'RETRY_SERVER_UPLOAD'});
+  assert.equal(retry.ok,false);assert.match(retry.error,/재전송할 서버 결과가 없습니다/);
+  assert.equal(h.fetchCalls.length,0);
 });
 test('untrusted content cannot start/retry server work and restart preserves upload intent',async()=>{
   const h=harness();tokenServer(h);

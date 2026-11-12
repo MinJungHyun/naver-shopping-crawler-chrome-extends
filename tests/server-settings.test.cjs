@@ -8,7 +8,7 @@ const server = require('../extension/server');
 const html=fs.readFileSync(path.join(__dirname,'../extension/dashboard.html'),'utf8');
 const script=fs.readFileSync(path.join(__dirname,'../extension/server-settings.js'),'utf8');
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
-function harness({extensionMode=true,demoMode=false,initial=null,granted=true,checkError=null}={}){
+function harness({extensionMode=true,demoMode=false,initial=null,granted=true,checkError=null,retryResult={}}={}){
   const {document,Event}=parseHTML(html).window, calls=[],permissions=[];
   let stored=initial;
   const $=id=>document.getElementById(id);
@@ -18,7 +18,8 @@ function harness({extensionMode=true,demoMode=false,initial=null,granted=true,ch
     if(type==='SAVE_SERVER_CONFIG'){stored=server.connection(data,stored||{});return {server:server.publicConfig(stored)};}
     if(type==='TEST_SERVER_CONNECTION'){if(checkError)throw Error(checkError);return {connected:true};}
     if(type==='CLEAR_SERVER_CONFIG'){stored=null;return {server:server.publicConfig(null)};}
-    if(type==='SERVER_START'||type==='RETRY_SERVER_UPLOAD')return {};
+    if(type==='SERVER_START')return {};
+    if(type==='RETRY_SERVER_UPLOAD')return retryResult;
   };
   const chrome={windows:{getCurrent:async()=>({id:1})},runtime:{id:'a'.repeat(32)},permissions:{request(value){permissions.push(value);return Promise.resolve(granted);}}};
   vm.runInNewContext(script,{document,extensionMode,demoMode,NSCServer:server,chrome,request,readSettings:()=>({maxPages:1})});
@@ -84,4 +85,16 @@ test('saved token login can start server collection without email or OAuth setti
   h.$('server-start').click();await tick();
   assert.equal(h.calls.find(c=>c.type==='SERVER_START').windowId,1);
   assert.equal(h.$('server-start').disabled,false);
+});
+test('upload retry shows the background result, including success and failure',async()=>{
+  const ok=harness({initial:{serverUrl:'https://collector.example',token:'s'.repeat(40)},retryResult:{uploaded:true,message:'서버 저장 완료 · 2건'}});await tick();
+  ok.$('server-upload').click();await tick();
+  assert.equal(ok.$('server-status').textContent,'서버 저장 완료 · 2건');
+  assert.equal(ok.$('server-status').dataset.error,'false');
+  assert.equal(ok.$('server-upload').disabled,false);
+  const failed=harness({initial:{serverUrl:'https://collector.example',token:'s'.repeat(40)},retryResult:{uploaded:false,message:'offline 로컬 결과는 보관됩니다. 업로드 재시도를 눌러주세요.'}});await tick();
+  failed.$('server-upload').click();await tick();
+  assert.match(failed.$('server-status').textContent,/로컬 결과는 보관됩니다/);
+  assert.equal(failed.$('server-status').dataset.error,'true');
+  assert.equal(failed.$('server-upload').disabled,false);
 });

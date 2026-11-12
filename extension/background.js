@@ -59,11 +59,15 @@ async function uploadServerResult(job, finishedStatus = 'completed') {
       log(job, job.message); await save({ job });
       await chrome.alarms.clear(WATCH);
       await chrome.alarms.create(NEXT, { when: job.nextActionAt });
-      return;
+      return { uploaded: true, message: job.message };
     }
     job.status = finishedStatus; job.phase = 'done'; job.nextActionAt = null;
     job.message = saved; log(job, job.message); await save({ job });
-  } catch (error) { await halt(job, error.message + ' 로컬 결과는 보관됩니다. 업로드 재시도를 눌러주세요.'); }
+    return { uploaded: true, message: job.message };
+  } catch (error) {
+    await halt(job, error.message + ' 로컬 결과는 보관됩니다. 업로드 재시도를 눌러주세요.', finishedStatus === 'stopped' ? 'stopped' : 'paused');
+    return { uploaded: false, message: job.message };
+  }
 }
 function log(job, message) { job.logs = [...(job.logs || []), { at: Date.now(), message }].slice(-150); }
 async function halt(job, message, status = 'paused') {
@@ -126,6 +130,8 @@ async function nextServerTask(job) {
   catch (error) { await halt(job, `다음 서버 키워드를 받지 못했습니다. ${error.message}`); return; }
   if (!tasks?.length) {
     job.status = 'completed'; job.phase = 'done'; job.finishedAt = Date.now(); job.nextActionAt = null;
+    // Nothing left to fetch: a later manual retry must not restart the wait loop.
+    job.server.autoNext = false;
     job.message = '대기 중인 서버 키워드가 없습니다. 수집을 마쳤습니다.'; log(job, job.message); await save({ job }); return;
   }
   const task = tasks[0];
@@ -175,8 +181,11 @@ async function handle(message, sender) {
   if (['SERVER_START', 'RETRY_SERVER_UPLOAD'].includes(message.type)) {
     if (!trustedDashboard(sender)) throw new Error('수집기 관리 화면에서 실행하세요.');
     if (message.type === 'RETRY_SERVER_UPLOAD') {
-      if (!job?.server?.uploadPending) throw new Error('재전송할 서버 결과가 없습니다.');
-      await uploadServerResult(job); return {};
+      const retryable = job?.server && items.length &&
+        (job.server.uploadPending || ['stopped', 'completed'].includes(job.status) || job.phase === 'keyword-wait');
+      if (!retryable) throw new Error('재전송할 서버 결과가 없습니다.');
+      const result = await uploadServerResult(job, job.status === 'stopped' ? 'stopped' : 'completed');
+      return { message: result.message, uploaded: result.uploaded };
     }
     if (job && ['running', 'paused'].includes(job.status)) throw new Error('현재 작업을 종료한 뒤 새 작업을 받으세요.');
     if (items.length && !job?.server?.uploaded) throw new Error('기존 결과를 다운로드하고 비운 뒤 시작하세요.');

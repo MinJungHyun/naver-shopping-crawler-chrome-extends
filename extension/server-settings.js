@@ -63,8 +63,10 @@
     if (saving || !extensionMode) return;
     lock(true);
     try {
-      await request(type, { settings: readSettings(), windowId: (await chrome.windows.getCurrent()).id });
-      message(type === 'SERVER_START' ? '서버 키워드 수집을 시작했습니다.' : '전송을 재시도했습니다. 수집 상태를 확인하세요.');
+      const result = await request(type, { settings: readSettings(), windowId: (await chrome.windows.getCurrent()).id });
+      if (type === 'SERVER_START') message('서버 키워드 수집을 시작했습니다.');
+      else if (result?.uploaded === false) message(result.message || '전송하지 못했습니다. 서버 연결을 확인한 뒤 다시 시도하세요.', true);
+      else message(result?.message || '전송을 재시도했습니다. 수집 상태를 확인하세요.');
     } catch (error) { message(error.message, true); } finally { lock(false); }
   });
   if (demoMode) { document.getElementById('server-panel').hidden = true; return; }
